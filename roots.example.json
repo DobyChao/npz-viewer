@@ -1,0 +1,9 @@
+{
+  "roots": [
+    {
+      "id": "sample-data",
+      "name": "样例数据",
+      "path": "D:/ZCodeProject/npz_view/sample_data"
+    }
+  ]
+}

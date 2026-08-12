@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface: oklch(0.17 0.005 260);
+  --color-surface-raised: oklch(0.21 0.006 260);
+  --color-edge: oklch(0.3 0.008 260);
+  --color-accent: oklch(0.72 0.14 210);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+}
+
+/* Alpha compositing backdrop for RGBA renders. */
+.checkerboard {
+  background-color: #2a2a2e;
+  background-image:
+    linear-gradient(45deg, #3a3a40 25%, transparent 25%),
+    linear-gradient(-45deg, #3a3a40 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #3a3a40 75%),
+    linear-gradient(-45deg, transparent 75%, #3a3a40 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+}
+
+/* Keep 1:1 and higher zoom levels pixel-exact for comparison work. */
+.pixelated {
+  image-rendering: pixelated;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: oklch(0.32 0.008 260);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.42 0.01 260);
+}

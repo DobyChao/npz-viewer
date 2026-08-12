@@ -1,0 +1,175 @@
+import { create } from "zustand";
+import { DEFAULT_VIEW_OPTIONS } from "../lib/types";
+import type {
+  CompareLayout,
+  CompareMode,
+  ComparePanelState,
+  ViewOptions,
+} from "../lib/types";
+
+export const MAX_COMPARE_ITEMS = 4;
+
+export interface CompareItem {
+  id: string;
+  npzPath: string;
+  npzName: string;
+  version: string;
+  key: string;
+  options: ViewOptions;
+}
+
+export interface Viewport {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+export const IDENTITY_VIEWPORT: Viewport = { scale: 1, x: 0, y: 0 };
+
+interface CompareState {
+  mode: CompareMode;
+  items: CompareItem[];
+  /** Key names selected in inside mode; deliberately survives switching npz. */
+  insideKeys: string[];
+  layout: CompareLayout;
+  toggleIndex: number | null;
+  /**
+   * FastStone's "Overlay (Right on Left)": the source tile's image is drawn on top
+   * of the first tile, so slight differences show up without the eye travelling
+   * between panes. Kept as flat fields so selectors stay referentially stable.
+   */
+  overlayEnabled: boolean;
+  /** Tile index whose image is painted over tile 1; never 0. */
+  overlaySource: number;
+  /** Momentarily hides the overlay (hold X) to blink between the two layers. */
+  overlayPeek: boolean;
+  /**
+   * Scale every tile so all images share the first one's display height. Without it,
+   * comparing a full-res render against a half-res gainmap is meaningless. A display
+   * preference, so it deliberately survives changing tiles.
+   */
+  equalHeight: boolean;
+  panel: ComparePanelState;
+  viewport: Viewport;
+  /** True while the viewport is still whatever "fit to window" produced. */
+  viewportFitted: boolean;
+  /** Bumped to ask the mounted panel to recompute a fit / 1:1 zoom. */
+  fitToken: number;
+  actualToken: number;
+  showPixelReadout: boolean;
+
+  setMode: (mode: CompareMode) => void;
+  addItem: (item: Omit<CompareItem, "id">) => boolean;
+  removeItem: (id: string) => void;
+  clearItems: () => void;
+  toggleInsideKey: (key: string) => void;
+  setInsideKeys: (keys: string[]) => void;
+  setLayout: (layout: CompareLayout) => void;
+  setPanel: (panel: ComparePanelState) => void;
+  cyclePanel: () => void;
+  setToggleIndex: (index: number | null) => void;
+  advanceToggle: (count: number) => void;
+  setOverlayEnabled: (enabled: boolean) => void;
+  setOverlaySource: (index: number) => void;
+  setOverlayPeek: (peek: boolean) => void;
+  setEqualHeight: (value: boolean) => void;
+  setViewport: (viewport: Viewport, source?: "manual" | "fit") => void;
+  requestFit: () => void;
+  requestActualSize: () => void;
+  setShowPixelReadout: (value: boolean) => void;
+}
+
+function itemId(npzPath: string, key: string): string {
+  return `${npzPath}::${key}`;
+}
+
+/** Changing which tiles are on screen invalidates both the A/B cursor and the overlay pairing. */
+const RESET_TILE_VIEWS = {
+  toggleIndex: null,
+  overlayEnabled: false,
+  overlaySource: 1,
+  overlayPeek: false,
+} as const;
+
+export const useCompareStore = create<CompareState>()((set, get) => ({
+  mode: "cross",
+  items: [],
+  insideKeys: [],
+  layout: "auto",
+  toggleIndex: null,
+  overlayEnabled: false,
+  overlaySource: 1,
+  overlayPeek: false,
+  equalHeight: false,
+  panel: "hidden",
+  viewport: IDENTITY_VIEWPORT,
+  viewportFitted: true,
+  fitToken: 0,
+  actualToken: 0,
+  showPixelReadout: true,
+
+  setMode: (mode) => set({ mode, ...RESET_TILE_VIEWS }),
+
+  addItem: (item) => {
+    const { items } = get();
+    const id = itemId(item.npzPath, item.key);
+    if (items.some((existing) => existing.id === id)) return true;
+    if (items.length >= MAX_COMPARE_ITEMS) return false;
+    set({
+      items: [...items, { ...item, id, options: { ...DEFAULT_VIEW_OPTIONS, ...item.options } }],
+      panel: get().panel === "hidden" ? "split" : get().panel,
+    });
+    return true;
+  },
+
+  removeItem: (id) =>
+    set((state) => ({
+      items: state.items.filter((item) => item.id !== id),
+      ...RESET_TILE_VIEWS,
+    })),
+
+  clearItems: () => set({ items: [], ...RESET_TILE_VIEWS }),
+
+  toggleInsideKey: (key) =>
+    set((state) => ({
+      insideKeys: state.insideKeys.includes(key)
+        ? state.insideKeys.filter((name) => name !== key)
+        : state.insideKeys.length >= MAX_COMPARE_ITEMS
+          ? state.insideKeys
+          : [...state.insideKeys, key],
+      ...RESET_TILE_VIEWS,
+      panel: state.panel === "hidden" ? "split" : state.panel,
+    })),
+
+  setInsideKeys: (keys) =>
+    set({ insideKeys: keys.slice(0, MAX_COMPARE_ITEMS), ...RESET_TILE_VIEWS }),
+  setLayout: (layout) => set({ layout }),
+  setPanel: (panel) => set({ panel }),
+  cyclePanel: () =>
+    set((state) => ({ panel: state.panel === "full" ? "split" : "full" })),
+  // A/B collapses to one tile and overlay stacks two, so only one can be active.
+  setToggleIndex: (index) =>
+    set(index === null ? { toggleIndex: null } : { toggleIndex: index, overlayEnabled: false }),
+
+  advanceToggle: (count) =>
+    set((state) => {
+      if (count === 0) return {};
+      if (state.toggleIndex === null) return { toggleIndex: 0, overlayEnabled: false };
+      return { toggleIndex: (state.toggleIndex + 1) % count };
+    }),
+
+  setOverlayEnabled: (enabled) =>
+    set(enabled ? { overlayEnabled: true, toggleIndex: null } : { overlayEnabled: false, overlayPeek: false }),
+  setOverlaySource: (index) => set({ overlaySource: Math.max(1, index) }),
+  setOverlayPeek: (peek) => set({ overlayPeek: peek }),
+  setEqualHeight: (value) => set({ equalHeight: value }),
+
+  // Panning must not reset when flipping between A and B, so the viewport is group-level state.
+  // Anything but an explicit fit counts as manual, which stops the panel from re-fitting
+  // on resize and throwing away a zoom the user chose.
+  setViewport: (viewport, source = "manual") =>
+    set({ viewport, viewportFitted: source === "fit" }),
+  requestFit: () => set((state) => ({ fitToken: state.fitToken + 1 })),
+  requestActualSize: () => set((state) => ({ actualToken: state.actualToken + 1 })),
+  setShowPixelReadout: (value) => set({ showPixelReadout: value }),
+}));
