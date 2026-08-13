@@ -7,12 +7,17 @@ linear RGB 图、gainmap、mask、特征图和一些小矩阵，需要快速看�
 - 前端 React + Vite + TailwindCSS，负责布局、缩略图、FastStone 式同步对比
 - 单文件夹 20 万个 npz 也能用：目录索引分三级缓存，列表服务端分页，缩略图懒加载并限流
 
-详细的需求与设计决策见 [`docs/SPEC.md`](docs/SPEC.md)。
+详细的需求与设计决策见 [`docs/SPEC.md`](docs/SPEC.md)。对比面板拖动收起/展开与按钮状态如何对齐，见 [`docs/resizable-panel-visibility.md`](docs/resizable-panel-visibility.md)。
 
 ## 环境要求
 
 - Python 3.11+（开发验证于 3.14）
-- Node.js 20+（开发验证于 24）
+- Node.js `^20.19.0 || >=22.12.0`（Vite 8 的要求，已写进 `frontend/package.json` 的 `engines`；
+  开发验证于 24）
+
+`typecheck` 脚本直接调用 `node node_modules/typescript/lib/tsc.js` 而不是 `tsc`，这是刻意的：
+typescript 7 的 `bin/tsc` 是个**没有扩展名**的 ESM 文件，只有较新的 Node 能把它当入口执行，稍旧的
+Node 会报 `ERR_UNKNOWN_FILE_EXTENSION`。改走带扩展名的 `lib/tsc.js`，在上面整个版本范围内都能用。
 
 ## 快速开始
 

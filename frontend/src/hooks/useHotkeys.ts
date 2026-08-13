@@ -5,7 +5,7 @@ export type HotkeyHandler = (event: KeyboardEvent) => void;
 /** Modifier-aware binding id, e.g. `ArrowLeft`, `ctrl+0`, ` ` for space. */
 export type HotkeyMap = Record<string, HotkeyHandler>;
 
-function isTypingTarget(target: EventTarget | null): boolean {
+export function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
   const tag = target.tagName;

@@ -16,8 +16,10 @@ import {
 } from "lucide-react";
 import { api } from "../../lib/api";
 import { formatNumber, formatPercent } from "../../lib/format";
+import { isTypingTarget } from "../../hooks/useHotkeys";
 import { useCurrentNpz } from "../../hooks/useCurrentNpz";
 import { useNpzNavigation } from "../../hooks/useNpzNavigation";
+import { useAppStore } from "../../store/useAppStore";
 import { useCompareStore } from "../../store/useCompareStore";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
 import type { CompareLayout } from "../../lib/types";
@@ -73,6 +75,7 @@ export function ComparePanel() {
   const overlayEnabled = useCompareStore((state) => state.overlayEnabled);
   const overlaySource = useCompareStore((state) => state.overlaySource);
   const overlayPeek = useCompareStore((state) => state.overlayPeek);
+  const lightbox = useAppStore((state) => state.lightbox);
   const equalHeight = useCompareStore((state) => state.equalHeight);
   const setEqualHeight = useCompareStore((state) => state.setEqualHeight);
   const setOverlayEnabled = useCompareStore((state) => state.setOverlayEnabled);
@@ -130,8 +133,11 @@ export function ComparePanel() {
   const visibleTiles = toggleIndex !== null && tiles.length > 0 ? [tiles[toggleIndex % tiles.length]] : tiles;
   const effectiveLayout = resolveLayout(layout, visibleTiles.length);
 
-  const overlayActive = overlayEnabled && tiles.length >= 2 && toggleIndex === null;
-  const overlayIndex = overlayActive ? Math.min(overlaySource, tiles.length - 1) : null;
+  // Overlay is available whenever two tiles sit side by side. Hold X to overlay
+  // (default); click the button to lock it on, then hold X to peek underneath.
+  const overlayAvailable = tiles.length >= 2 && toggleIndex === null && panel !== "hidden";
+  const overlaySourceIndex = overlayAvailable ? Math.min(overlaySource, tiles.length - 1) : null;
+  const overlayVisible = overlayAvailable && overlayEnabled !== overlayPeek;
 
   // The first visible tile is the baseline: fitting, 1:1 and equal-height all key off it.
   const referenceSize = visibleTiles.length ? (naturalSizes[visibleTiles[0].id] ?? null) : null;
@@ -159,12 +165,15 @@ export function ComparePanel() {
     return seen.size > 1;
   }, [tiles, naturalSizes]);
 
-  // Hold X to drop the top layer: alternating the two is how a slight difference becomes visible.
+  // Hold X to overlay (or, when locked, to drop the top layer).
   useEffect(() => {
-    if (!overlayActive) return;
+    if (!overlayAvailable || lightbox) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "x" && event.key !== "X") return;
       if (event.repeat) return;
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      if (isTypingTarget(event.target)) return;
+      event.preventDefault();
       setOverlayPeek(event.type === "keydown");
     };
     window.addEventListener("keydown", onKey);
@@ -174,12 +183,13 @@ export function ComparePanel() {
       window.removeEventListener("keyup", onKey);
       setOverlayPeek(false);
     };
-  }, [overlayActive, setOverlayPeek]);
+  }, [overlayAvailable, lightbox, setOverlayPeek]);
 
   const fit = useCallback(() => {
     const first = gridRef.current?.firstElementChild as HTMLElement | null;
     const size = referenceSizeRef.current;
     if (!first || !size || size.width === 0 || size.height === 0) return;
+    if (first.clientWidth < 8 || first.clientHeight < 8) return;
     const scale =
       Math.min(first.clientWidth / size.width, first.clientHeight / size.height) * 0.98;
     setViewport(
@@ -239,6 +249,7 @@ export function ComparePanel() {
     const first = gridRef.current?.firstElementChild as HTMLElement | null;
     const size = referenceSizeRef.current;
     if (!first || !size) return;
+    if (first.clientWidth < 8 || first.clientHeight < 8) return;
     setViewport({
       scale: 1,
       x: (first.clientWidth - size.width) / 2,
@@ -350,9 +361,14 @@ export function ComparePanel() {
           </Button>
 
           <Button
-            title="覆盖：把覆盖源那一格的图叠到第 1 格上，按住 X 临时移开"
+            title={
+              overlayEnabled
+                ? "覆盖已锁定：按住 X 临时移开。再点一次改回按住 X 才覆盖"
+                : "按住 X 把覆盖源叠到第 1 格；点击锁定覆盖"
+            }
             data-testid="overlay-toggle"
-            active={overlayActive}
+            data-locked={overlayEnabled ? "true" : "false"}
+            active={overlayEnabled && overlayAvailable}
             disabled={tiles.length < 2}
             onClick={() => setOverlayEnabled(!overlayEnabled)}
           >
@@ -411,18 +427,22 @@ export function ComparePanel() {
               viewport={viewport}
               scaleFactor={heightFactor(tile.id)}
               overlay={
-                overlayIndex !== null && index === 0
+                overlaySourceIndex !== null && index === 0
                   ? {
-                      spec: tiles[overlayIndex],
-                      index: overlayIndex,
-                      hidden: overlayPeek,
-                      scaleFactor: heightFactor(tiles[overlayIndex].id),
+                      spec: tiles[overlaySourceIndex],
+                      index: overlaySourceIndex,
+                      hidden: !overlayVisible,
+                      scaleFactor: heightFactor(tiles[overlaySourceIndex].id),
                     }
                   : undefined
               }
-              isOverlaySource={overlayIndex !== null && index === overlayIndex}
+              isOverlaySource={
+                overlaySourceIndex !== null &&
+                index === overlaySourceIndex &&
+                (overlayEnabled || overlayVisible)
+              }
               onPickOverlaySource={
-                overlayIndex !== null && index > 0 && index !== overlayIndex
+                overlaySourceIndex !== null && index > 0 && index !== overlaySourceIndex
                   ? () => setOverlaySource(index)
                   : undefined
               }
@@ -444,10 +464,15 @@ export function ComparePanel() {
             A/B {toggleIndex + 1} / {tiles.length} · 空格切换
           </button>
         )}
-        {overlayIndex !== null && (
+        {overlaySourceIndex !== null && (
           <span data-testid="overlay-status" className="text-amber-400">
-            覆盖 {overlayIndex + 1} → 1 ·{" "}
-            {overlayPeek ? "已移开，松开 X 恢复" : "按住 X 移开覆盖层"}
+            {overlayEnabled
+              ? overlayVisible
+                ? `覆盖 ${overlaySourceIndex + 1} → 1 · 按住 X 移开覆盖层`
+                : "已移开，松开 X 恢复"
+              : overlayVisible
+                ? `覆盖 ${overlaySourceIndex + 1} → 1 · 松开 X 移开`
+                : `按住 X 覆盖 ${overlaySourceIndex + 1} → 1`}
           </span>
         )}
         {equalHeight && referenceSize && (

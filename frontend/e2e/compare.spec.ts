@@ -122,6 +122,36 @@ test("stepping to the next file keeps the current zoom", async ({ page }) => {
   expect(parsePercent((await zoomLabel.textContent()) ?? "0")).toBe(zoomed);
 });
 
+test("holding X overlays without locking, and the button locks it on", async ({ page }) => {
+  await selectSampleFrame(page);
+  await openInsideCompare(page, ["rgb_hwc", "gainmap"]);
+
+  const baseTile = page.getByTestId("compare-tile").first();
+  const overlay = baseTile.getByTestId("compare-overlay");
+  await expect(overlay).toHaveCount(0);
+  await expect(page.getByTestId("overlay-status")).toContainText("按住 X 覆盖 2 → 1");
+  await expect(page.getByTestId("overlay-toggle")).toHaveAttribute("data-locked", "false");
+
+  await page.keyboard.down("x");
+  await expect(overlay).toBeVisible();
+  await expect(page.getByTestId("overlay-status")).toContainText("松开 X 移开");
+  const base = await baseTile.getByTestId("compare-image").evaluate((n) => (n as HTMLElement).style.transform);
+  expect(await overlay.evaluate((n) => (n as HTMLElement).style.transform)).toBe(base);
+  await page.keyboard.up("x");
+  await expect(overlay).toHaveCount(0);
+
+  await page.getByTestId("overlay-toggle").click();
+  await expect(page.getByTestId("overlay-toggle")).toHaveAttribute("data-locked", "true");
+  await expect(overlay).toBeVisible();
+  await expect(page.getByTestId("overlay-status")).toContainText("按住 X 移开覆盖层");
+
+  await page.keyboard.down("x");
+  await expect(overlay).toHaveCount(0);
+  await expect(page.getByTestId("overlay-status")).toContainText("已移开");
+  await page.keyboard.up("x");
+  await expect(overlay).toBeVisible();
+});
+
 test("overlay paints the source tile on top of the first one", async ({ page }) => {
   await selectSampleFrame(page);
   await openInsideCompare(page, ["rgb_hwc", "gainmap"]);
@@ -132,6 +162,8 @@ test("overlay paints the source tile on top of the first one", async ({ page }) 
 
   await page.getByTestId("overlay-toggle").click();
   await expect(overlay).toBeVisible();
+
+  await expect(page.getByTestId("overlay-toggle")).toHaveAttribute("data-locked", "true");
 
   // Both layers ride the shared viewport, so they must sit at the same transform.
   const base = await baseTile.getByTestId("compare-image").evaluate((n) => (n as HTMLElement).style.transform);
@@ -302,6 +334,24 @@ test("zoomed-in images switch to nearest-neighbour sampling", async ({ page }) =
   }
 
   await expect(image).toHaveClass(/pixelated/);
+});
+
+test("missing inside-compare keys can be removed", async ({ page }) => {
+  await selectSampleFrame(page);
+  await openInsideCompare(page, ["rgb_hwc", "gainmap"]);
+
+  // frame_004 is generated without gainmap / soft_mask, so the checked name survives
+  // as a KEY NOT FOUND tile that has to be removable.
+  await page.locator('[data-testid="npz-row"][data-path$="frame_004.npz"]').click();
+  const missing = page.locator('[data-testid="compare-tile"][data-missing="true"]');
+  await expect(missing).toBeVisible();
+  await expect(missing).toContainText("gainmap");
+  await expect(page.getByTestId("inside-key-missing")).toHaveAttribute("data-key", "gainmap");
+
+  await missing.getByTestId("remove-tile").click();
+  await expect(page.getByTestId("compare-tile")).toHaveCount(1);
+  await expect(page.getByTestId("inside-key-missing")).toHaveCount(0);
+  await expect(page.getByTestId("compare-tile").first()).toHaveAttribute("data-key", "rgb_hwc");
 });
 
 test("keyboard navigation walks files and sibling folders", async ({ page }) => {

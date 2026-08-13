@@ -118,6 +118,18 @@ def write_npz(path: Path, payload: dict[str, np.ndarray], compress: bool) -> Non
     saver(path, **payload)
 
 
+# Inside-compare keeps the checked key names when you step to another npz.
+# The last frame and method_b drop a few so KEY NOT FOUND is a real fixture,
+# not something that only happens with mocked metadata.
+OMIT_ON_LAST_FRAME = ("gainmap", "gainmap_half", "soft_mask")
+OMIT_ON_METHOD_B = ("object_mask", "depth_raw")
+
+
+def _omit_keys(payload: dict[str, np.ndarray], names: tuple[str, ...]) -> None:
+    for name in names:
+        payload.pop(name, None)
+
+
 def build_tree(out_dir: Path, count: int, height: int, width: int) -> int:
     written = 0
     for scene_index in range(1, 3):
@@ -126,13 +138,21 @@ def build_tree(out_dir: Path, count: int, height: int, width: int) -> int:
             for frame in range(1, count + 1):
                 seed = scene_index * 1000 + variant_index * 100 + frame
                 payload = build_payload(height, width, seed, tint=variant_index)
+                omitted: list[str] = []
+                if frame == count:
+                    _omit_keys(payload, OMIT_ON_LAST_FRAME)
+                    omitted.extend(OMIT_ON_LAST_FRAME)
+                if variant == "method_b":
+                    _omit_keys(payload, OMIT_ON_METHOD_B)
+                    omitted.extend(OMIT_ON_METHOD_B)
                 write_npz(
                     folder / f"frame_{frame:03d}.npz",
                     payload,
                     compress=frame % 2 == 0,
                 )
                 written += 1
-                print(f"  {folder.name}/frame_{frame:03d}.npz", flush=True)
+                suffix = f"  (no {', '.join(omitted)})" if omitted else ""
+                print(f"  {folder.name}/frame_{frame:03d}.npz{suffix}", flush=True)
     return written
 
 

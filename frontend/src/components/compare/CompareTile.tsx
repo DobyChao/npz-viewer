@@ -96,13 +96,28 @@ export function CompareTile({
 
   if (spec.missing) {
     return (
-      <div className="relative flex min-h-0 min-w-0 flex-col items-center justify-center gap-2 border border-dashed border-zinc-700 bg-zinc-900/40">
+      <div
+        data-testid="compare-tile"
+        data-key={spec.key}
+        data-missing="true"
+        className="relative flex min-h-0 min-w-0 flex-col items-center justify-center gap-2 border border-dashed border-zinc-700 bg-zinc-900/40"
+      >
         <FileQuestion size={22} className="text-zinc-700" />
         <div className="px-3 text-center">
           <div className="font-mono text-xs text-zinc-500">KEY NOT FOUND</div>
           <div className="mt-0.5 font-mono text-[11px] text-zinc-600">{spec.key}</div>
           <div className="mt-1 truncate text-[10px] text-zinc-700">{spec.npzName}</div>
         </div>
+        {onRemove && (
+          <IconButton
+            title="从对比中移除（当前 npz 没有这个 key）"
+            data-testid="remove-tile"
+            className="absolute top-1 right-1 h-5 w-5 bg-black/65"
+            onClick={onRemove}
+          >
+            <X size={11} />
+          </IconButton>
+        )}
       </div>
     );
   }
@@ -113,10 +128,7 @@ export function CompareTile({
       data-testid="compare-tile"
       data-key={spec.key}
       data-overlay={overlay ? (overlay.hidden ? "hidden" : "on") : undefined}
-      className={clsx(
-        "checkerboard relative min-h-0 min-w-0 cursor-grab overflow-hidden border active:cursor-grabbing",
-        overlay || isOverlaySource ? "border-amber-500/60" : "border-zinc-800",
-      )}
+      className="checkerboard relative min-h-0 min-w-0 cursor-grab overflow-hidden border border-zinc-800 active:cursor-grabbing"
       onPointerDown={panZoom.onPointerDown}
       onPointerMove={(event) => {
         panZoom.onPointerMove(event);

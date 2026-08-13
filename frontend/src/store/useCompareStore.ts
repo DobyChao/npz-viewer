@@ -34,14 +34,17 @@ interface CompareState {
   layout: CompareLayout;
   toggleIndex: number | null;
   /**
-   * FastStone's "Overlay (Right on Left)": the source tile's image is drawn on top
-   * of the first tile, so slight differences show up without the eye travelling
-   * between panes. Kept as flat fields so selectors stay referentially stable.
+   * FastStone's "Overlay (Right on Left)". When true the overlay is locked on;
+   * when false, hold X to overlay. Kept as flat fields so selectors stay
+   * referentially stable.
    */
   overlayEnabled: boolean;
   /** Tile index whose image is painted over tile 1; never 0. */
   overlaySource: number;
-  /** Momentarily hides the overlay (hold X) to blink between the two layers. */
+  /**
+   * True while X is held. XOR'd with overlayEnabled: hold X to overlay
+   * (default), or lock overlay on and hold X to peek underneath.
+   */
   overlayPeek: boolean;
   /**
    * Scale every tile so all images share the first one's display height. Without it,
@@ -50,6 +53,8 @@ interface CompareState {
    */
   equalHeight: boolean;
   panel: ComparePanelState;
+  /** Last split height of the compare pane, as a percentage of the right column. */
+  splitComparePercent: number;
   viewport: Viewport;
   /** True while the viewport is still whatever "fit to window" produced. */
   viewportFitted: boolean;
@@ -66,6 +71,7 @@ interface CompareState {
   setInsideKeys: (keys: string[]) => void;
   setLayout: (layout: CompareLayout) => void;
   setPanel: (panel: ComparePanelState) => void;
+  setSplitComparePercent: (percent: number) => void;
   cyclePanel: () => void;
   setToggleIndex: (index: number | null) => void;
   advanceToggle: (count: number) => void;
@@ -102,6 +108,7 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   overlayPeek: false,
   equalHeight: false,
   panel: "hidden",
+  splitComparePercent: 45,
   viewport: IDENTITY_VIEWPORT,
   viewportFitted: true,
   fitToken: 0,
@@ -145,6 +152,8 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
     set({ insideKeys: keys.slice(0, MAX_COMPARE_ITEMS), ...RESET_TILE_VIEWS }),
   setLayout: (layout) => set({ layout }),
   setPanel: (panel) => set({ panel }),
+  setSplitComparePercent: (percent) =>
+    set({ splitComparePercent: Math.min(85, Math.max(15, percent)) }),
   cyclePanel: () =>
     set((state) => ({ panel: state.panel === "full" ? "split" : "full" })),
   // A/B collapses to one tile and overlay stacks two, so only one can be active.

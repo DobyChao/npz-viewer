@@ -1,6 +1,7 @@
-import { useCallback } from "react";
+import { useCallback, useLayoutEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
+import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
+import type { Layout, LayoutChangedMeta, PanelSize } from "react-resizable-panels";
 import { api } from "./lib/api";
 import { useHotkeys } from "./hooks/useHotkeys";
 import { useNpzNavigation } from "./hooks/useNpzNavigation";
@@ -16,8 +17,47 @@ import { GalleryGrid } from "./components/gallery/GalleryGrid";
 import { Lightbox } from "./components/gallery/Lightbox";
 
 const HANDLE_CLASS =
-  "relative bg-zinc-800 transition-colors data-[resizing]:bg-cyan-600 hover:bg-cyan-700/60 " +
-  "data-[orientation=horizontal]:w-px data-[orientation=vertical]:h-px";
+  "relative shrink-0 bg-zinc-800 transition-colors data-[resizing]:bg-cyan-600 hover:bg-cyan-700/60 " +
+  "aria-[orientation=vertical]:w-px aria-[orientation=horizontal]:h-px";
+
+function isCollapsedSize(size: PanelSize): boolean {
+  return size.inPixels < 2 || size.asPercentage === 0;
+}
+
+/**
+ * Dragging past minSize goes through the same `panel` store as the toggle.
+ * After collapse the sash stays enabled so you can drag it back (VS Code panel).
+ * Button-open restores the last split ratio; drag-open keeps the size the sash set.
+ */
+function applyPanelLayout(
+  panel: "hidden" | "split" | "full",
+  gallery: { collapse: () => void; expand: () => void; isCollapsed: () => boolean },
+  compare: {
+    collapse: () => void;
+    expand: () => void;
+    isCollapsed: () => boolean;
+    resize: (size: number | string) => void;
+  },
+  splitComparePercent: number,
+): void {
+  if (panel === "hidden") {
+    if (!compare.isCollapsed()) compare.collapse();
+    if (gallery.isCollapsed()) gallery.expand();
+    return;
+  }
+  if (panel === "full") {
+    if (!gallery.isCollapsed()) gallery.collapse();
+    if (compare.isCollapsed()) compare.expand();
+    return;
+  }
+  if (gallery.isCollapsed()) gallery.expand();
+  if (compare.isCollapsed()) {
+    compare.expand();
+    compare.resize(`${splitComparePercent}%`);
+    return;
+  }
+  // Dragging the sash back from collapsed already sized the pane; don't snap it.
+}
 
 export default function App() {
   const queryClient = useQueryClient();
@@ -37,7 +77,61 @@ export default function App() {
 
   const mainLayout = useDefaultLayout({ id: "npzview.main", panelIds: ["left", "right"] });
   const leftLayout = useDefaultLayout({ id: "npzview.left", panelIds: ["tree", "list"] });
-  const rightLayout = useDefaultLayout({ id: "npzview.right", panelIds: ["gallery", "compare"] });
+  const rightLayout = useDefaultLayout({
+    id: "npzview.right",
+    panelIds: ["gallery", "compare"],
+    // Collapse/expand is driven by panel state; only persist sizes the user dragged.
+    onlySaveAfterUserInteractions: true,
+  });
+  const galleryPanelRef = usePanelRef();
+  const comparePanelRef = usePanelRef();
+
+  useLayoutEffect(() => {
+    const gallery = galleryPanelRef.current;
+    const compare = comparePanelRef.current;
+    if (!gallery || !compare) return;
+    applyPanelLayout(
+      panel,
+      gallery,
+      compare,
+      useCompareStore.getState().splitComparePercent,
+    );
+  }, [panel, galleryPanelRef, comparePanelRef]);
+
+  const persistRightLayout = useCallback(
+    (layout: Layout, meta: LayoutChangedMeta) => {
+      // A 0% snapshot is a hidden/full view, not a split ratio worth restoring.
+      if ((layout.compare ?? 0) < 1 || (layout.gallery ?? 0) < 1) return;
+      rightLayout.onLayoutChanged(layout, meta);
+    },
+    [rightLayout],
+  );
+
+  const onCompareResize = useCallback((next: PanelSize, _id: string | number | undefined, prev: PanelSize | undefined) => {
+    if (!prev) return;
+    const collapsed = isCollapsedSize(next);
+    const { panel: current, setPanel, setSplitComparePercent } = useCompareStore.getState();
+    if (collapsed !== isCollapsedSize(prev)) {
+      if (collapsed && current === "split") setPanel("hidden");
+      else if (!collapsed && current === "hidden") {
+        setPanel("split");
+        if (next.asPercentage >= 15) setSplitComparePercent(next.asPercentage);
+      }
+      return;
+    }
+    if (!collapsed && current === "split") setSplitComparePercent(next.asPercentage);
+  }, []);
+
+  const onGalleryResize = useCallback((next: PanelSize, _id: string | number | undefined, prev: PanelSize | undefined) => {
+    if (!prev) return;
+    if (isCollapsedSize(next) === isCollapsedSize(prev)) return;
+    const current = useCompareStore.getState().panel;
+    if (isCollapsedSize(next) && current === "split") {
+      useCompareStore.getState().setPanel("full");
+    } else if (!isCollapsedSize(next) && current === "full") {
+      useCompareStore.getState().setPanel("split");
+    }
+  }, []);
 
   const refreshCurrentDir = useCallback(() => {
     if (!currentDir) return;
@@ -104,30 +198,42 @@ export default function App() {
             <NpzInfo />
             <CompareBar />
 
-            {panel === "full" ? (
-              <div className="min-h-0 flex-1">
-                <ComparePanel />
-              </div>
-            ) : panel === "split" ? (
-              <Group
-                orientation="vertical"
-                className="min-h-0 flex-1"
-                defaultLayout={rightLayout.defaultLayout}
-                onLayoutChanged={rightLayout.onLayoutChanged}
+            <Group
+              orientation="vertical"
+              className="min-h-0 flex-1"
+              defaultLayout={rightLayout.defaultLayout}
+              onLayoutChanged={persistRightLayout}
+              resizeTargetMinimumSize={{ coarse: 28, fine: 12 }}
+            >
+              <Panel
+                id="gallery"
+                panelRef={galleryPanelRef}
+                minSize="15"
+                collapsible
+                collapsedSize="0%"
+                className="min-h-0"
+                onResize={onGalleryResize}
               >
-                <Panel id="gallery" minSize="15" className="min-h-0">
-                  <GalleryGrid />
-                </Panel>
-                <Separator className={HANDLE_CLASS} />
-                <Panel id="compare" defaultSize="45" minSize="15" className="min-h-0">
-                  <ComparePanel />
-                </Panel>
-              </Group>
-            ) : (
-              <div className="min-h-0 flex-1">
                 <GalleryGrid />
-              </div>
-            )}
+              </Panel>
+              <Separator
+                id="gallery-compare-separator"
+                data-testid="gallery-compare-separator"
+                className={HANDLE_CLASS}
+              />
+              <Panel
+                id="compare"
+                panelRef={comparePanelRef}
+                defaultSize="45"
+                minSize="15"
+                collapsible
+                collapsedSize="0%"
+                className="min-h-0"
+                onResize={onCompareResize}
+              >
+                <ComparePanel />
+              </Panel>
+            </Group>
           </div>
         </Panel>
       </Group>

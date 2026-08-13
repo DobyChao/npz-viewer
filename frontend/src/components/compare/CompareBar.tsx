@@ -59,6 +59,8 @@ export function CompareBar() {
   const setPanel = useCompareStore((state) => state.setPanel);
 
   const renderableKeys = (meta?.keys ?? []).filter((key) => key.renderable);
+  const renderableNames = new Set(renderableKeys.map((key) => key.name));
+  const missingSelected = insideKeys.filter((name) => !renderableNames.has(name));
   const selectedCount = mode === "cross" ? items.length : insideKeys.length;
 
   return (
@@ -84,6 +86,7 @@ export function CompareBar() {
           )}
           <IconButton
             title={panel === "hidden" ? "显示对比面板" : "隐藏对比面板"}
+            data-testid="compare-panel-toggle"
             active={panel !== "hidden"}
             onClick={() => setPanel(panel === "hidden" ? "split" : "hidden")}
           >
@@ -106,7 +109,21 @@ export function CompareBar() {
 
       {mode === "inside" && (
         <div className="mt-1.5 flex flex-wrap gap-1">
-          {renderableKeys.length === 0 ? (
+          {missingSelected.map((name) => (
+            <button
+              key={name}
+              type="button"
+              data-testid="inside-key-missing"
+              data-key={name}
+              onClick={() => toggleInsideKey(name)}
+              title="当前 npz 没有这个 key，点击移除"
+              className="rounded border border-dashed border-amber-700/80 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[11px] text-amber-400 hover:border-amber-500 hover:bg-amber-500/20"
+            >
+              {name}
+              <span className="ml-1 text-[10px] text-amber-600">×</span>
+            </button>
+          ))}
+          {renderableKeys.length === 0 && missingSelected.length === 0 ? (
             <span className="text-[11px] text-zinc-600">当前 npz 没有可渲染的 key。</span>
           ) : (
             renderableKeys.map((key) => {
@@ -136,7 +153,7 @@ export function CompareBar() {
           )}
           {insideKeys.length > 0 && (
             <span className="ml-2 self-center text-[11px] text-zinc-600">
-              切换 npz 时会保持勾选，缺失的 key 用占位块显示
+              切换 npz 时会保持勾选，找不到的 key 可点掉移除
             </span>
           )}
         </div>

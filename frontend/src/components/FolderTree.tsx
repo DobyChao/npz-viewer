@@ -27,12 +27,14 @@ function TreeNode({
   const currentDir = useAppStore((state) => state.currentDir);
   const setDir = useAppStore((state) => state.setDir);
   const onPathToSelection = isAncestorOf(path, currentDir);
-  const [open, setOpen] = useState(onPathToSelection);
+  const [open, setOpen] = useState(onPathToSelection && hasChildren);
 
-  // Re-expand the branch when the selection is restored from localStorage or moves via hotkeys.
+  // Re-expand ancestors (and folders that actually have children) when the
+  // selection is restored from localStorage or moves via hotkeys. Leaf folders
+  // stay collapsed — there is nothing to show underneath.
   useEffect(() => {
-    if (onPathToSelection) setOpen(true);
-  }, [onPathToSelection]);
+    if (onPathToSelection && hasChildren) setOpen(true);
+  }, [onPathToSelection, hasChildren]);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["dirs", path],
@@ -41,12 +43,20 @@ function TreeNode({
   });
 
   const selected = currentDir?.toLowerCase() === path.toLowerCase();
+  const childCount = data?.dirs.length ?? null;
+  const expanded = open && (isLoading || childCount === null || childCount > 0);
+
+  useEffect(() => {
+    if (childCount === 0 && open) setOpen(false);
+  }, [childCount, open]);
 
   return (
     <div>
       <div
         data-testid="tree-node"
         data-path={path}
+        data-expanded={expanded ? "true" : "false"}
+        data-has-children={hasChildren ? "true" : "false"}
         className={clsx(
           "group flex h-6 cursor-pointer items-center gap-1 rounded pr-2 text-xs",
           selected ? "bg-cyan-500/15 text-cyan-200" : "text-zinc-400 hover:bg-zinc-800/70",
@@ -63,18 +73,19 @@ function TreeNode({
           className="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-600 hover:text-zinc-300"
           onClick={(event) => {
             event.stopPropagation();
+            if (!hasChildren) return;
             setOpen((value) => !value);
           }}
         >
           {hasChildren ? (
-            open ? (
+            expanded ? (
               <ChevronDown size={12} />
             ) : (
               <ChevronRight size={12} />
             )
           ) : null}
         </button>
-        {open ? (
+        {expanded ? (
           <FolderOpen size={13} className="shrink-0 text-amber-500/70" />
         ) : (
           <Folder size={13} className="shrink-0 text-amber-500/50" />
@@ -82,7 +93,7 @@ function TreeNode({
         <span className="truncate">{name}</span>
       </div>
 
-      {open && (
+      {expanded && (
         <div>
           {isLoading && (
             <div style={{ paddingLeft: `${depth * 12 + 24}px` }} className="py-1">
@@ -103,14 +114,6 @@ function TreeNode({
               depth={depth + 1}
             />
           ))}
-          {data && data.dirs.length === 0 && (
-            <div
-              style={{ paddingLeft: `${depth * 12 + 24}px` }}
-              className="py-1 text-[11px] text-zinc-700"
-            >
-              没有子文件夹
-            </div>
-          )}
         </div>
       )}
     </div>
