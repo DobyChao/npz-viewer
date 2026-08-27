@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import type { Layout, LayoutChangedMeta, PanelSize } from "react-resizable-panels";
@@ -41,8 +41,11 @@ function applyPanelLayout(
   splitComparePercent: number,
 ): void {
   if (panel === "hidden") {
-    if (!compare.isCollapsed()) compare.collapse();
+    // Expand gallery first so it can reclaim space, then collapse compare.
+    // The other order lets gallery.expand() restore the last split ratio and
+    // bring compare back on screen while store.panel is already "hidden".
     if (gallery.isCollapsed()) gallery.expand();
+    compare.collapse();
     return;
   }
   if (panel === "full") {
@@ -85,17 +88,22 @@ export default function App() {
   });
   const galleryPanelRef = usePanelRef();
   const comparePanelRef = usePanelRef();
+  const applyingLayoutRef = useRef(false);
 
   useLayoutEffect(() => {
     const gallery = galleryPanelRef.current;
     const compare = comparePanelRef.current;
     if (!gallery || !compare) return;
+    applyingLayoutRef.current = true;
     applyPanelLayout(
       panel,
       gallery,
       compare,
       useCompareStore.getState().splitComparePercent,
     );
+    queueMicrotask(() => {
+      applyingLayoutRef.current = false;
+    });
   }, [panel, galleryPanelRef, comparePanelRef]);
 
   const persistRightLayout = useCallback(
@@ -108,7 +116,7 @@ export default function App() {
   );
 
   const onCompareResize = useCallback((next: PanelSize, _id: string | number | undefined, prev: PanelSize | undefined) => {
-    if (!prev) return;
+    if (!prev || applyingLayoutRef.current) return;
     const collapsed = isCollapsedSize(next);
     const { panel: current, setPanel, setSplitComparePercent } = useCompareStore.getState();
     if (collapsed !== isCollapsedSize(prev)) {
@@ -123,7 +131,7 @@ export default function App() {
   }, []);
 
   const onGalleryResize = useCallback((next: PanelSize, _id: string | number | undefined, prev: PanelSize | undefined) => {
-    if (!prev) return;
+    if (!prev || applyingLayoutRef.current) return;
     if (isCollapsedSize(next) === isCollapsedSize(prev)) return;
     const current = useCompareStore.getState().panel;
     if (isCollapsedSize(next) && current === "split") {
@@ -141,12 +149,22 @@ export default function App() {
     });
   }, [currentDir, queryClient]);
 
+  const playing = useCompareStore((state) => state.sequence.playing);
+
   useHotkeys(
     {
-      ArrowLeft: () => void nav.go("file", "prev"),
-      ArrowRight: () => void nav.go("file", "next"),
-      ArrowUp: () => void nav.go("folder", "prev"),
-      ArrowDown: () => void nav.go("folder", "next"),
+      ArrowLeft: () => {
+        if (!playing) void nav.go("file", "prev");
+      },
+      ArrowRight: () => {
+        if (!playing) void nav.go("file", "next");
+      },
+      ArrowUp: () => {
+        if (!playing) void nav.go("folder", "prev");
+      },
+      ArrowDown: () => {
+        if (!playing) void nav.go("folder", "next");
+      },
       space: () => advanceToggle(tileCount),
       "1": () => setToggleIndex(0),
       "2": () => tileCount > 1 && setToggleIndex(1),
@@ -223,6 +241,7 @@ export default function App() {
               />
               <Panel
                 id="compare"
+                data-testid="compare"
                 panelRef={comparePanelRef}
                 defaultSize="45"
                 minSize="15"

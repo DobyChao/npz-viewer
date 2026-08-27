@@ -132,3 +132,57 @@ class SiblingResult(BaseModel):
     name: str
     index: int
     total: int
+
+
+VideoJobStatus = Literal["queued", "running", "done", "error", "cancelled"]
+VideoCrop = Literal["full", "viewport"]
+CompareGridLayout = Literal["auto", "1x1", "1x2", "2x1", "1x3", "3x1", "2x2"]
+
+
+class ExportKey(BaseModel):
+    key: str
+    batch: int = 0
+    layout: str = "auto"
+    channel: int = 0
+    normalize: bool = False
+    colormap: Colormap = "none"
+    alpha: AlphaMode = "composite"
+    gainmap_gamut: bool = False
+
+
+class NaturalSize(BaseModel):
+    width: int
+    height: int
+
+
+class ViewportSpec(BaseModel):
+    scale: float
+    x: float
+    y: float
+    tile_width: float
+    tile_height: float
+    natural_sizes: list[NaturalSize] = []
+
+
+class VideoExportRequest(BaseModel):
+    path: str
+    keys: list[ExportKey]
+    start: int
+    end: int
+    fps: float = 12
+    layout: CompareGridLayout = "auto"
+    crop: VideoCrop = "full"
+    max_size: int = 1920
+    equal_height: bool = False
+    confirm_large: bool = False
+    gamut: Gamut = "bt2020"
+    viewport: ViewportSpec | None = None
+
+
+class VideoJobInfo(BaseModel):
+    id: str
+    status: VideoJobStatus
+    current: int = 0
+    total: int = 0
+    error: str | None = None
+    filename: str | None = None

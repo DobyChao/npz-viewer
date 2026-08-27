@@ -11,6 +11,8 @@ import type {
   SiblingResult,
   SortField,
   SortOrder,
+  VideoExportRequest,
+  VideoJobInfo,
   ViewOptions,
 } from "./types";
 
@@ -110,6 +112,13 @@ export const api = {
   sibling: (path: string, scope: "file" | "folder", direction: "next" | "prev") =>
     request<SiblingResult>("/nav/sibling", { path, scope, direction }),
   locate: (path: string) => request<SiblingResult>("/nav/locate", { path }),
+  navAt: (path: string, index: number) => request<SiblingResult>("/nav/at", { path, index }),
+
+  startVideoExport: (body: VideoExportRequest) => postJson<VideoJobInfo>("/video/export", body),
+  videoJob: (id: string) => request<VideoJobInfo>(`/video/jobs/${encodeURIComponent(id)}`),
+  cancelVideoJob: (id: string) =>
+    request<VideoJobInfo>(`/video/jobs/${encodeURIComponent(id)}/cancel`, {}, { method: "POST" }),
+  videoFileUrl: (id: string) => `${BASE}/video/jobs/${encodeURIComponent(id)}/file`,
 };
 
 /** Cache buster: render URLs are immutable, so they must change when the file does. */

@@ -18,6 +18,8 @@ export type CompareMode = "cross" | "inside";
 export type ComparePanelState = "hidden" | "split" | "full";
 /** Rows × columns; "auto" derives the grid from how many tiles are showing. */
 export type CompareLayout = "auto" | "1x1" | "1x2" | "2x1" | "1x3" | "3x1" | "2x2";
+export type VideoCrop = "full" | "viewport";
+export type VideoJobStatus = "queued" | "running" | "done" | "error" | "cancelled";
 
 export interface RootInfo {
   id: string;
@@ -114,6 +116,48 @@ export interface SiblingResult {
   name: string;
   index: number;
   total: number;
+}
+
+export interface VideoExportKey {
+  key: string;
+  batch: number;
+  layout?: string;
+  channel: number;
+  normalize: boolean;
+  colormap: string;
+  alpha: string;
+  gainmap_gamut: boolean;
+}
+
+export interface VideoExportRequest {
+  path: string;
+  keys: VideoExportKey[];
+  start: number;
+  end: number;
+  fps: number;
+  layout: CompareLayout;
+  crop: VideoCrop;
+  max_size: number;
+  equal_height: boolean;
+  confirm_large: boolean;
+  gamut: Gamut;
+  viewport?: {
+    scale: number;
+    x: number;
+    y: number;
+    tile_width: number;
+    tile_height: number;
+    natural_sizes: { width: number; height: number }[];
+  };
+}
+
+export interface VideoJobInfo {
+  id: string;
+  status: VideoJobStatus;
+  current: number;
+  total: number;
+  error: string | null;
+  filename: string | null;
 }
 
 export interface ServerSettings {

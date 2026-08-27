@@ -209,7 +209,13 @@ backend/
 | GET | `/api/npz/render` | 见下 | `image/png` 或 `image/webp` |
 | GET | `/api/npz/thumb` | `path,key=,size=192,v=` | `image/webp` |
 | GET | `/api/npz/pixel` | `path,key,x,y,batch=` | `{values:[...]}`（对比视图取值读数用） |
-| GET | `/api/nav/sibling` | `path, scope=file\|folder, direction=next\|prev` | `{path}` 或 404 |
+| GET | `/api/nav/sibling` | `path, scope=file\|folder, direction=next\|prev` | `{path,name,index,total}` 或 404 |
+| GET | `/api/nav/locate` | `path` | `{path,name,index,total}` |
+| GET | `/api/nav/at` | `path, index` | 该目录自然序第 `index` 个 npz（0 起）；越界 400 |
+| POST | `/api/video/export` | 见 §6.6 | `{id,status,current,total}` |
+| GET | `/api/video/jobs/{id}` | — | `{id,status,current,total,error,filename}` |
+| POST | `/api/video/jobs/{id}/cancel` | — | 更新后的 job |
+| GET | `/api/video/jobs/{id}/file` | — | `video/mp4` 下载；未完成 404 |
 
 `KeyMeta`：
 ```ts
@@ -366,6 +372,7 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 - 顶部导航：`◀ 上一个 npz / 下一个 npz ▶`（同目录内）、`◀ 上级文件夹 / 下级 ▶`（兄弟文件夹里相同序号的 npz）。
 - **文件内模式跨文件跟随**：切到新 npz 后，用相同的 key 名重新构造 tile；如果新 npz 里没有这个 key，该位置渲染 `NotFoundTile` 占位（灰底 + `KEY NOT FOUND: <key>`），**不要塌陷布局**。
 - 鼠标悬停时在工具栏显示当前像素坐标和原始数值（调 `/api/npz/pixel`，节流 100ms）。
+- **序列栏（仅文件内对比）**：底部起止帧、播放、scrubber、导出。跨文件模式隐藏。详见 §6.6。
 
 ### 6.5 快捷键
 
@@ -374,6 +381,7 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 | `←` / `→` | 同目录上一个 / 下一个 npz |
 | `↑` / `↓` | 兄弟文件夹中相同序号的 npz（上/下一个文件夹） |
 | `空格` | A/B toggle 切换 |
+| `P` | 文件内对比且已选起止帧时，播放/暂停序列；跨文件或未选区间时忽略 |
 | `1`~`4` | 单独查看第 n 个 tile |
 | `F` | 对比面板占满 / 还原 |
 | `Ctrl+0` | 适应窗口 |
@@ -382,6 +390,34 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 | `R` | 刷新当前目录 |
 
 输入框聚焦时全部快捷键失效。
+
+### 6.6 序列播放与宫格导出（仅文件内对比）
+
+序列 = 当前 npz 所在目录里、按自然名排序的兄弟 `.npz`。对比格共用同一文件、key 不同。跨文件对比**不做**序列播放/导出；切到跨文件、清空勾选或关掉对比面板时停止播放并丢掉起止帧。
+
+**播放**
+
+- 必须先选起止帧（闭区间，0 起的目录序号），不默认跑整个文件夹。
+- playhead 只改对比瓦片用的 path，**不** `jumpToFile`，文件列表保持原选中项。暂停后可「定位到当前帧」。
+- 播放中可继续平移缩放；空格仍是 A/B。播到结束帧后停止，停在最后一帧；再按播放从起始帧重来。
+- 仅播放中预取后续帧到内存；暂停或播完后停止。下一帧未就绪则等待（降低有效 fps），不跳帧、不盖加载转圈。
+- 新文件没有某 key：该格 KEY NOT FOUND 占位，不塌布局。
+
+**导出**
+
+- 一条 MP4（H.264 / yuv420p / 无音轨），按当前宫格拼（含 auto 推导），格子标签为 `key` + 文件名。不烤覆盖层、不烤 A/B 闪烁。
+- 两种裁剪：`full` 完整原图（等高跟随面板开关）；`viewport` 按对比面板当前缩放/平移裁，公式与像素读数一致：`effective = scale * scaleFactor`，`src = (-x/effective, -y/effective, tileW/effective, tileH/effective)`。
+- 长边上限 1080 / 1920 / 2160（默认 1920）。FPS 默认 12，范围 1–60。
+- 软上限 2000 帧（需 `confirm_large`），硬上限 10000。
+- ffmpeg 经 `imageio-ffmpeg` 捆绑，不依赖系统安装。成品放 cache 目录，浏览器下载。
+
+`POST /api/video/export` body：
+
+```
+path, keys:[{key, batch, layout, channel, normalize, colormap, alpha, gainmap_gamut}],
+gamut, start, end, fps, layout, crop: full|viewport, max_size, equal_height,
+confirm_large, viewport?: {scale,x,y,tile_width,tile_height,natural_sizes:[{width,height}]}
+```
 
 ---
 
@@ -480,3 +516,4 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 | 日期 | 变更 | 原因 |
 | --- | --- | --- |
 | 2026-08-12 | 初版 | — |
+| 2026-08-27 | 文件内对比：序列播放 + 宫格 MP4 导出 | 跨文件序列明确不做 |

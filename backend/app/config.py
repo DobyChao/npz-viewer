@@ -65,12 +65,17 @@ class Settings(BaseSettings):
     def header_cache_dir(self) -> Path:
         return self.cache_dir / "header"
 
+    @property
+    def video_cache_dir(self) -> Path:
+        return self.cache_dir / "video"
+
     def ensure_dirs(self) -> None:
         for directory in (
             self.render_cache_dir,
             self.thumb_cache_dir,
             self.dirindex_cache_dir,
             self.header_cache_dir,
+            self.video_cache_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
 

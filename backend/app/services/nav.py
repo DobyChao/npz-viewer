@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from ..errors import FileNotFound
+from ..errors import BadParam, FileNotFound
 from ..models import SiblingResult
 from ..paths import natural_key, to_posix
 from .dirindex import dir_index
@@ -87,6 +87,23 @@ def locate(path: Path) -> SiblingResult:
         raise FileNotFound(to_posix(path))
     return SiblingResult(
         path=to_posix(path), name=path.name, index=index, total=len(snapshot.entries)
+    )
+
+
+def sibling_at(path: Path, index: int) -> SiblingResult:
+    """The ``index``-th npz in ``path``'s folder, in natural-name order."""
+    snapshot = dir_index.snapshot(path.parent)
+    total = len(snapshot.entries)
+    if total == 0:
+        raise FileNotFound(f"{to_posix(path.parent)} 中没有 npz")
+    if not 0 <= index < total:
+        raise BadParam(f"序号越界: {index}，有效范围 0~{total - 1}")
+    entry = snapshot.entries[index]
+    return SiblingResult(
+        path=to_posix(path.parent / entry.name),
+        name=entry.name,
+        index=index,
+        total=total,
     )
 
 

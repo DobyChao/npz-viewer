@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api import fs, nav, npz, roots
+from .api import fs, nav, npz, roots, video
 from .config import Settings, get_settings, set_settings
 from .errors import AppError
 from .models import Health
@@ -126,6 +126,7 @@ def create_app() -> FastAPI:
     app.include_router(fs.router)
     app.include_router(npz.router)
     app.include_router(nav.router)
+    app.include_router(video.router)
 
     if settings.static_dir and settings.static_dir.is_dir():
         app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="static")

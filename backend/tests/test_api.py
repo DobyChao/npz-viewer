@@ -232,6 +232,19 @@ def test_locate_reports_position(client: TestClient, frame: Path) -> None:
     assert (body["index"], body["total"]) == (0, 3)
 
 
+def test_nav_at_picks_by_ordinal(client: TestClient, frame: Path) -> None:
+    body = client.get("/api/nav/at", params={"path": frame.as_posix(), "index": 2}).json()
+    assert body["name"] == "frame_10.npz"
+    assert body["index"] == 2
+    assert body["total"] == 3
+
+
+def test_nav_at_rejects_out_of_range(client: TestClient, frame: Path) -> None:
+    response = client.get("/api/nav/at", params={"path": frame.as_posix(), "index": 9})
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "BAD_PARAM"
+
+
 def test_refresh_clears_the_index(client: TestClient, sample_dir: Path) -> None:
     folder = (sample_dir / "scene_01" / "baseline").as_posix()
     client.get("/api/npz/list", params={"dir": folder})

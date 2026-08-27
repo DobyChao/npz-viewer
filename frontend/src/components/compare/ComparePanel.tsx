@@ -14,7 +14,8 @@ import {
   Scan,
   X,
 } from "lucide-react";
-import { api } from "../../lib/api";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { api, versionOf } from "../../lib/api";
 import { formatNumber, formatPercent } from "../../lib/format";
 import { isTypingTarget } from "../../hooks/useHotkeys";
 import { useCurrentNpz } from "../../hooks/useCurrentNpz";
@@ -26,6 +27,7 @@ import type { CompareLayout } from "../../lib/types";
 import { Button, EmptyState, IconButton, SectionHeader, Select } from "../ui";
 import { CompareTile } from "./CompareTile";
 import type { TileSpec } from "./CompareTile";
+import { SequenceBar } from "./SequenceBar";
 
 const PIXEL_THROTTLE_MS = 120;
 
@@ -90,6 +92,31 @@ export function ComparePanel() {
   const removeItem = useCompareStore((state) => state.removeItem);
   const toggleInsideKey = useCompareStore((state) => state.toggleInsideKey);
   const showPixelReadout = useCompareStore((state) => state.showPixelReadout);
+  const sequence = useCompareStore((state) => state.sequence);
+  const gamut = useAppStore((state) => state.gamut);
+
+  const { data: playFile } = useQuery({
+    queryKey: ["nav-at", path, sequence.playhead],
+    queryFn: () => api.navAt(path!, sequence.playhead!),
+    enabled: Boolean(path) && mode === "inside" && sequence.playhead !== null,
+    placeholderData: keepPreviousData,
+  });
+
+  const tilePath = mode === "inside" && playFile?.path ? playFile.path : path;
+  const { data: playMeta } = useQuery({
+    queryKey: ["npz-meta", tilePath],
+    queryFn: () => api.meta(tilePath!),
+    enabled: Boolean(tilePath) && mode === "inside",
+    placeholderData: keepPreviousData,
+  });
+  const tileMeta = playMeta ?? meta;
+  const tileVersion =
+    mode === "inside" && sequence.playhead !== null
+      ? ""
+      : tileMeta
+        ? versionOf(tileMeta)
+        : version;
+  const tileName = playFile?.name ?? tileMeta?.name ?? meta?.name ?? "";
 
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [naturalSizes, setNaturalSizes] = useState<Record<string, ImageSize>>({});
@@ -113,21 +140,21 @@ export function ComparePanel() {
         removable: true,
       }));
     }
-    if (!path || !meta) return [];
+    if (!path || !tileMeta) return [];
     return insideKeys.map((key) => {
-      const keyMeta = meta.keys.find((candidate) => candidate.name === key);
+      const keyMeta = tileMeta.keys.find((candidate) => candidate.name === key);
       return {
-        id: `${path}::${key}`,
+        id: `inside::${key}`,
         key,
-        npzPath: path,
-        npzName: meta.name,
-        version,
+        npzPath: tilePath ?? path,
+        npzName: tileName,
+        version: tileVersion,
         options: DEFAULT_VIEW_OPTIONS,
-        missing: !keyMeta?.renderable,
+        missing: tilePath != null && tileMeta.path === tilePath ? !keyMeta?.renderable : false,
         removable: true,
       };
     });
-  }, [mode, items, insideKeys, path, meta, version]);
+  }, [mode, items, insideKeys, path, meta, version, tileMeta, tilePath, tileName, tileVersion]);
 
   const signature = tiles.map((tile) => tile.id).join("|");
   const visibleTiles = toggleIndex !== null && tiles.length > 0 ? [tiles[toggleIndex % tiles.length]] : tiles;
@@ -452,6 +479,24 @@ export function ComparePanel() {
             />
           ))}
         </div>
+      )}
+
+      {mode === "inside" && path && insideKeys.length > 0 && (
+        <SequenceBar
+          path={path}
+          keys={insideKeys}
+          gamut={gamut}
+          layout={layout}
+          equalHeight={equalHeight}
+          viewport={viewport}
+          measureTile={() => {
+            const tile = gridRef.current?.firstElementChild as HTMLElement | null;
+            return { width: tile?.clientWidth ?? 0, height: tile?.clientHeight ?? 0 };
+          }}
+          naturalSizes={insideKeys.map(
+            (key) => naturalSizes[`inside::${key}`] ?? { width: 0, height: 0 },
+          )}
+        />
       )}
 
       <div className="flex h-6 shrink-0 items-center gap-4 border-t border-zinc-800 bg-zinc-900/60 px-3 font-mono text-[10px] text-zinc-500 tabular-nums">

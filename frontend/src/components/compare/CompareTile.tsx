@@ -164,7 +164,7 @@ export function CompareTile({
         />
       )}
 
-      {state === "loading" && (
+      {state === "loading" && !src && (
         <div className="absolute inset-0 flex items-center justify-center">
           <Spinner />
         </div>

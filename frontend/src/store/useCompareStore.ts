@@ -26,6 +26,26 @@ export interface Viewport {
 
 export const IDENTITY_VIEWPORT: Viewport = { scale: 1, x: 0, y: 0 };
 
+export interface SequenceState {
+  start: number | null;
+  end: number | null;
+  playhead: number | null;
+  playing: boolean;
+  fps: number;
+}
+
+export const DEFAULT_SEQUENCE: SequenceState = {
+  start: null,
+  end: null,
+  playhead: null,
+  playing: false,
+  fps: 12,
+};
+
+function clearedSequence(fps: number): SequenceState {
+  return { ...DEFAULT_SEQUENCE, fps };
+}
+
 interface CompareState {
   mode: CompareMode;
   items: CompareItem[];
@@ -62,6 +82,7 @@ interface CompareState {
   fitToken: number;
   actualToken: number;
   showPixelReadout: boolean;
+  sequence: SequenceState;
 
   setMode: (mode: CompareMode) => void;
   addItem: (item: Omit<CompareItem, "id">) => boolean;
@@ -83,6 +104,9 @@ interface CompareState {
   requestFit: () => void;
   requestActualSize: () => void;
   setShowPixelReadout: (value: boolean) => void;
+  setSequence: (patch: Partial<SequenceState>) => void;
+  resetSequence: () => void;
+  togglePlayback: () => void;
 }
 
 function itemId(npzPath: string, key: string): string {
@@ -114,8 +138,14 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   fitToken: 0,
   actualToken: 0,
   showPixelReadout: true,
+  sequence: { ...DEFAULT_SEQUENCE },
 
-  setMode: (mode) => set({ mode, ...RESET_TILE_VIEWS }),
+  setMode: (mode) =>
+    set((state) => ({
+      mode,
+      ...RESET_TILE_VIEWS,
+      sequence: clearedSequence(state.sequence.fps),
+    })),
 
   addItem: (item) => {
     const { items } = get();
@@ -138,20 +168,32 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   clearItems: () => set({ items: [], ...RESET_TILE_VIEWS }),
 
   toggleInsideKey: (key) =>
-    set((state) => ({
-      insideKeys: state.insideKeys.includes(key)
+    set((state) => {
+      const insideKeys = state.insideKeys.includes(key)
         ? state.insideKeys.filter((name) => name !== key)
         : state.insideKeys.length >= MAX_COMPARE_ITEMS
           ? state.insideKeys
-          : [...state.insideKeys, key],
-      ...RESET_TILE_VIEWS,
-      panel: state.panel === "hidden" ? "split" : state.panel,
-    })),
+          : [...state.insideKeys, key];
+      return {
+        insideKeys,
+        ...RESET_TILE_VIEWS,
+        panel: state.panel === "hidden" ? "split" : state.panel,
+        sequence: insideKeys.length === 0 ? clearedSequence(state.sequence.fps) : state.sequence,
+      };
+    }),
 
   setInsideKeys: (keys) =>
-    set({ insideKeys: keys.slice(0, MAX_COMPARE_ITEMS), ...RESET_TILE_VIEWS }),
+    set((state) => ({
+      insideKeys: keys.slice(0, MAX_COMPARE_ITEMS),
+      ...RESET_TILE_VIEWS,
+      sequence: keys.length === 0 ? clearedSequence(state.sequence.fps) : state.sequence,
+    })),
   setLayout: (layout) => set({ layout }),
-  setPanel: (panel) => set({ panel }),
+  setPanel: (panel) =>
+    set((state) => ({
+      panel,
+      sequence: panel === "hidden" ? clearedSequence(state.sequence.fps) : state.sequence,
+    })),
   setSplitComparePercent: (percent) =>
     set({ splitComparePercent: Math.min(85, Math.max(15, percent)) }),
   cyclePanel: () =>
@@ -181,4 +223,18 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   requestFit: () => set((state) => ({ fitToken: state.fitToken + 1 })),
   requestActualSize: () => set((state) => ({ actualToken: state.actualToken + 1 })),
   setShowPixelReadout: (value) => set({ showPixelReadout: value }),
+  setSequence: (patch) =>
+    set((state) => ({ sequence: { ...state.sequence, ...patch } })),
+  resetSequence: () =>
+    set((state) => ({ sequence: clearedSequence(state.sequence.fps) })),
+  togglePlayback: () =>
+    set((state) => {
+      const { start, end, playhead, playing } = state.sequence;
+      if (start === null || end === null || start > end) return {};
+      if (playing) return { sequence: { ...state.sequence, playing: false } };
+      const atEnd = playhead !== null && playhead >= end;
+      const nextHead =
+        playhead === null || playhead < start || playhead > end || atEnd ? start : playhead;
+      return { sequence: { ...state.sequence, playing: true, playhead: nextHead } };
+    }),
 }));

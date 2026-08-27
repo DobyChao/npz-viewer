@@ -27,3 +27,12 @@ async def sibling(
 async def locate(path: str = Query(...)) -> SiblingResult:
     target = resolve_file(path)
     return await asyncio.to_thread(nav.locate, target)
+
+
+@router.get("/at", response_model=SiblingResult)
+async def at(
+    path: str = Query(...),
+    index: int = Query(..., ge=0),
+) -> SiblingResult:
+    target = resolve_file(path)
+    return await asyncio.to_thread(nav.sibling_at, target, index)

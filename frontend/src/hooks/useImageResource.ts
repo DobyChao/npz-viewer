@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError } from "../lib/api";
+import { loadImage, peekImage, releaseImage, retainImage } from "../lib/imageCache";
 
 const MAX_CONCURRENT_GATED = 4;
 
@@ -25,19 +25,6 @@ class RequestGate {
 
 const gate = new RequestGate();
 
-async function parseError(response: Response): Promise<Error> {
-  try {
-    const body = await response.json();
-    const detail = body?.detail;
-    if (detail && typeof detail === "object") {
-      return new ApiError(response.status, detail.code, detail.message, detail.hint ?? null);
-    }
-  } catch {
-    // fall through to the generic message
-  }
-  return new ApiError(response.status, "HTTP_ERROR", `${response.status} ${response.statusText}`, null);
-}
-
 export type ImageState = "idle" | "loading" | "ready" | "error";
 
 export interface ImageResourceOptions {
@@ -51,17 +38,19 @@ export interface ImageResourceOptions {
 /**
  * Fetches a rendered image as a blob rather than binding the URL to `<img src>`.
  *
- * Going through `fetch` buys two things the plain element cannot give us:
- * in-flight cancellation when a row scrolls away, and the backend's structured
- * error payload instead of an opaque `onerror`.
+ * Sequence playback prefetches into {@link loadImage}'s cache, so a tile can
+ * swap to the next frame from memory. The previous bitmap stays on screen until
+ * the next one is actually ready — no spinner overlay.
  */
 export function useImageResource(url: string | null, options: ImageResourceOptions = {}) {
   const { enabled = true, lazy = false, gated = false } = options;
   const elementRef = useRef<HTMLDivElement | null>(null);
-  const objectUrlRef = useRef<string | null>(null);
+  const retainedUrl = useRef<string | null>(null);
   const [visible, setVisible] = useState(!lazy);
-  const [src, setSrc] = useState<string | null>(null);
-  const [state, setState] = useState<ImageState>("idle");
+  const [src, setSrc] = useState<string | null>(() => (url ? peekImage(url) : null));
+  const [state, setState] = useState<ImageState>(() =>
+    url && peekImage(url) ? "ready" : "idle",
+  );
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
@@ -82,9 +71,24 @@ export function useImageResource(url: string | null, options: ImageResourceOptio
     if (!visible || !enabled || !url) return;
     let cancelled = false;
     let release: (() => void) | null = null;
-    const controller = new AbortController();
-    setState("loading");
-    setError(null);
+
+    const show = (objectUrl: string) => {
+      if (retainedUrl.current && retainedUrl.current !== url) {
+        releaseImage(retainedUrl.current);
+      }
+      retainImage(url);
+      retainedUrl.current = url;
+      setSrc(objectUrl);
+      setState("ready");
+      setError(null);
+    };
+
+    const cached = peekImage(url);
+    if (cached) {
+      show(cached);
+      return;
+    }
+    if (!retainedUrl.current) setState("loading");
 
     void (async () => {
       if (gated) release = await gate.acquire();
@@ -93,16 +97,11 @@ export function useImageResource(url: string | null, options: ImageResourceOptio
         return;
       }
       try {
-        const response = await fetch(url, { signal: controller.signal });
-        if (!response.ok) throw await parseError(response);
-        const blob = await response.blob();
+        const objectUrl = await loadImage(url);
         if (cancelled) return;
-        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = URL.createObjectURL(blob);
-        setSrc(objectUrlRef.current);
-        setState("ready");
+        show(objectUrl);
       } catch (caught) {
-        if (cancelled || (caught instanceof DOMException && caught.name === "AbortError")) return;
+        if (cancelled) return;
         setError(caught instanceof Error ? caught : new Error(String(caught)));
         setState("error");
       } finally {
@@ -112,14 +111,13 @@ export function useImageResource(url: string | null, options: ImageResourceOptio
 
     return () => {
       cancelled = true;
-      controller.abort();
       release?.();
     };
   }, [visible, enabled, url, gated]);
 
   useEffect(
     () => () => {
-      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      if (retainedUrl.current) releaseImage(retainedUrl.current);
     },
     [],
   );
