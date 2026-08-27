@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 import threading
 import time
@@ -13,9 +14,10 @@ import numpy as np
 import numpy.typing as npt
 from PIL import Image, ImageDraw
 
-from ..config import get_settings
+from ..config import get_roots_store, get_settings
 from ..errors import AppError, BadParam, KeyNotFound, UnsupportedKind
 from ..models import ExportKey, VideoExportRequest, VideoJobInfo
+from ..paths import resolve_within, to_posix
 from . import nav, npzio, render
 from .render import RenderParams
 
@@ -381,6 +383,7 @@ class VideoJob:
     error: str | None = None
     filename: str | None = None
     output_path: Path | None = None
+    saved_path: str | None = None
     cancel: threading.Event = field(default_factory=threading.Event)
     created_at: float = field(default_factory=time.time)
 
@@ -392,6 +395,7 @@ class VideoJob:
             total=self.total,
             error=self.error,
             filename=self.filename,
+            saved_path=self.saved_path,
         )
 
 
@@ -419,6 +423,29 @@ class VideoJobStore:
 jobs = VideoJobStore()
 
 
+def unique_dest(directory: Path, filename: str) -> Path:
+    dest = directory / filename
+    if not dest.exists():
+        return dest
+    stem = dest.stem
+    suffix = dest.suffix
+    n = 1
+    while True:
+        candidate = directory / f"{stem}_{n}{suffix}"
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
+def resolve_save_dir(anchor: Path, save_dir: str | None) -> Path:
+    raw = (save_dir or "").strip() or to_posix(anchor.parent)
+    directory = resolve_within(raw, get_roots_store().root_paths())
+    directory.mkdir(parents=True, exist_ok=True)
+    if not directory.is_dir():
+        raise BadParam(f"保存目录不可用: {raw}")
+    return directory
+
+
 def validate_request(request: VideoExportRequest, anchor: Path) -> int:
     if not request.keys:
         raise BadParam("至少选择一个 key")
@@ -437,6 +464,7 @@ def validate_request(request: VideoExportRequest, anchor: Path) -> int:
             raise BadParam("视口格子尺寸过小")
         if request.viewport.scale <= 0:
             raise BadParam("视口缩放必须大于 0")
+    resolve_save_dir(anchor, request.save_dir)
 
     located = nav.locate(anchor)
     total_files = located.total
@@ -485,6 +513,13 @@ def _run_job(job: VideoJob, anchor: Path, request: VideoExportRequest) -> None:
         if process.returncode:
             message = stderr.decode("utf-8", errors="replace")[-800:]
             raise BadParam(f"ffmpeg 编码失败: {message or process.returncode}")
+        dest = unique_dest(resolve_save_dir(anchor, request.save_dir), job.filename or f"{job.id}.mp4")
+        try:
+            shutil.copy2(output, dest)
+            job.saved_path = to_posix(dest)
+        except OSError as exc:
+            job.saved_path = to_posix(output)
+            logger.warning("could not copy export to %s: %s", dest, exc)
         job.output_path = output
         job.status = "done"
     except AppError as exc:

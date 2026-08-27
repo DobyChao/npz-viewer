@@ -150,20 +150,25 @@ export default function App() {
   }, [currentDir, queryClient]);
 
   const playing = useCompareStore((state) => state.sequence.playing);
+  const sequenceEngaged = useCompareStore((state) => state.sequence.engaged);
 
   useHotkeys(
     {
       ArrowLeft: () => {
-        if (!playing) void nav.go("file", "prev");
+        if (playing || sequenceEngaged) return;
+        void nav.go("file", "prev");
       },
       ArrowRight: () => {
-        if (!playing) void nav.go("file", "next");
+        if (playing || sequenceEngaged) return;
+        void nav.go("file", "next");
       },
       ArrowUp: () => {
-        if (!playing) void nav.go("folder", "prev");
+        if (playing || sequenceEngaged) return;
+        void nav.go("folder", "prev");
       },
       ArrowDown: () => {
-        if (!playing) void nav.go("folder", "next");
+        if (playing || sequenceEngaged) return;
+        void nav.go("folder", "next");
       },
       space: () => advanceToggle(tileCount),
       "1": () => setToggleIndex(0),

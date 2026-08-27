@@ -35,8 +35,20 @@ test("inside-compare sequence bar stays disabled until a range is chosen", async
 
   const bar = page.getByTestId("sequence-bar");
   await expect(bar).toBeVisible();
+  await expect(bar).toHaveAttribute("data-engaged", "false");
+  await expect(page.getByTestId("sequence-source")).toHaveText("列表");
   await expect(page.getByTestId("sequence-play")).toBeDisabled();
   await expect(page.getByTestId("sequence-export")).toBeDisabled();
+});
+
+test("compare tiles follow the file list until sequence mode is entered", async ({ page }) => {
+  await selectSampleFrame(page);
+  await openInsideCompare(page, ["rgb_hwc"]);
+  await expect(page.getByTestId("compare-tile").first()).toContainText("frame_001");
+
+  await page.locator('[data-testid="npz-row"][data-path$="frame_002.npz"]').click();
+  await expect(page.getByTestId("compare-tile").first()).toContainText("frame_002");
+  await expect(page.getByTestId("sequence-bar")).toHaveAttribute("data-engaged", "false");
 });
 
 test("playing a range changes tile filenames without moving the file list", async ({ page }) => {
@@ -55,9 +67,28 @@ test("playing a range changes tile filenames without moving the file list", asyn
   });
   await expect(page.getByTestId("sequence-play")).toHaveAttribute("title", "播放（P）");
   await expect(page.getByTestId("compare-tile").first()).toContainText("frame_003");
+  await expect(page.getByTestId("sequence-bar")).toHaveAttribute("data-engaged", "true");
   await expect(
     page.locator('[data-testid="npz-row"][data-path$="frame_001.npz"]'),
   ).toHaveAttribute("data-selected", "true");
+});
+
+test("clicking a list file exits sequence mode and updates compare tiles", async ({ page }) => {
+  await selectSampleFrame(page);
+  await openInsideCompare(page, ["rgb_hwc"]);
+
+  await page.getByTestId("sequence-start").fill("1");
+  await page.getByTestId("sequence-end").fill("3");
+  await page.getByTestId("sequence-play").click();
+  await expect(page.getByTestId("compare-tile").first()).toContainText("frame_003", {
+    timeout: 8_000,
+  });
+  await expect(page.getByTestId("sequence-bar")).toHaveAttribute("data-engaged", "true");
+
+  await page.locator('[data-testid="npz-row"][data-path$="frame_002.npz"]').click();
+  await expect(page.getByTestId("sequence-bar")).toHaveAttribute("data-engaged", "false");
+  await expect(page.getByTestId("sequence-source")).toHaveText("列表");
+  await expect(page.getByTestId("compare-tile").first()).toContainText("frame_002");
 });
 
 test("pausing sequence stops prefetch requests", async ({ page }) => {

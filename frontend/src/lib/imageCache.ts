@@ -4,7 +4,7 @@ import { ApiError } from "./api";
  * Shared decoded-image cache. Sequence playback prefetches into this so compare
  * tiles can swap frames without a second network round-trip or a loading flash.
  */
-const MAX_ENTRIES = 64;
+const MAX_ENTRIES = 128;
 
 const ready = new Map<string, string>();
 const inflight = new Map<string, Promise<string>>();
@@ -72,6 +72,13 @@ export function loadImage(url: string): Promise<string> {
     if (!response.ok) throw await parseError(response);
     const blob = await response.blob();
     const objectUrl = URL.createObjectURL(blob);
+    try {
+      const image = new Image();
+      image.src = objectUrl;
+      await image.decode();
+    } catch {
+      // Decode is best-effort; the object URL is still usable as img src.
+    }
     ready.set(url, objectUrl);
     order.push(url);
     inflight.delete(url);

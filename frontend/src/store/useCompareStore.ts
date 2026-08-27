@@ -27,17 +27,24 @@ export interface Viewport {
 export const IDENTITY_VIEWPORT: Viewport = { scale: 1, x: 0, y: 0 };
 
 export interface SequenceState {
+  /** When true, compare tiles follow playhead; otherwise they follow the file list. */
+  engaged: boolean;
   start: number | null;
   end: number | null;
   playhead: number | null;
+  playPath: string | null;
+  playName: string | null;
   playing: boolean;
   fps: number;
 }
 
 export const DEFAULT_SEQUENCE: SequenceState = {
+  engaged: false,
   start: null,
   end: null,
   playhead: null,
+  playPath: null,
+  playName: null,
   playing: false,
   fps: 12,
 };
@@ -106,6 +113,7 @@ interface CompareState {
   setShowPixelReadout: (value: boolean) => void;
   setSequence: (patch: Partial<SequenceState>) => void;
   resetSequence: () => void;
+  exitSequence: () => void;
   togglePlayback: () => void;
 }
 
@@ -227,6 +235,17 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
     set((state) => ({ sequence: { ...state.sequence, ...patch } })),
   resetSequence: () =>
     set((state) => ({ sequence: clearedSequence(state.sequence.fps) })),
+  exitSequence: () =>
+    set((state) => ({
+      sequence: {
+        ...state.sequence,
+        engaged: false,
+        playing: false,
+        playhead: null,
+        playPath: null,
+        playName: null,
+      },
+    })),
   togglePlayback: () =>
     set((state) => {
       const { start, end, playhead, playing } = state.sequence;
@@ -235,6 +254,8 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
       const atEnd = playhead !== null && playhead >= end;
       const nextHead =
         playhead === null || playhead < start || playhead > end || atEnd ? start : playhead;
-      return { sequence: { ...state.sequence, playing: true, playhead: nextHead } };
+      return {
+        sequence: { ...state.sequence, engaged: true, playing: true, playhead: nextHead },
+      };
     }),
 }));

@@ -1,16 +1,12 @@
 import { useEffect, useRef } from "react";
-import { api, renderUrl } from "../lib/api";
-import { dirname } from "../lib/format";
-import { isImageReady, loadImage, mapPool } from "../lib/imageCache";
+import { renderUrl } from "../lib/api";
+import { isImageReady, loadImage, mapPool, releaseImage, retainImage } from "../lib/imageCache";
+import { loadSibling } from "../lib/navCache";
 import { useCompareStore } from "../store/useCompareStore";
-import type { Gamut, SiblingResult } from "../lib/types";
+import type { Gamut } from "../lib/types";
 
-const PREFETCH = 8;
-const PREFETCH_CONCURRENCY = 4;
-const NAV_CACHE_MAX = 256;
-
-const navByDirIndex = new Map<string, SiblingResult>();
-const navOrder: string[] = [];
+const PREFETCH = 12;
+const PREFETCH_CONCURRENCY = 2;
 
 export function rangeReady(start: number | null, end: number | null): boolean {
   return start !== null && end !== null && start <= end;
@@ -18,6 +14,10 @@ export function rangeReady(start: number | null, end: number | null): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
 function urlsFor(filePath: string, keys: string[], gamut: Gamut): string[] {
@@ -30,22 +30,16 @@ async function ensureUrls(urls: string[]): Promise<void> {
   });
 }
 
-function navKey(anchor: string, index: number): string {
-  return `${dirname(anchor)}\0${index}`;
-}
-
-async function fileAt(anchor: string, index: number): Promise<SiblingResult> {
-  const key = navKey(anchor, index);
-  const hit = navByDirIndex.get(key);
-  if (hit) return hit;
-  const file = await api.navAt(anchor, index);
-  navByDirIndex.set(key, file);
-  navOrder.push(key);
-  while (navOrder.length > NAV_CACHE_MAX) {
-    const oldest = navOrder.shift();
-    if (oldest) navByDirIndex.delete(oldest);
+function syncPins(previous: string[], next: string[]): string[] {
+  const nextSet = new Set(next);
+  const prevSet = new Set(previous);
+  for (const url of previous) {
+    if (!nextSet.has(url)) releaseImage(url);
   }
-  return file;
+  for (const url of next) {
+    if (!prevSet.has(url)) retainImage(url);
+  }
+  return next;
 }
 
 export function useSequencePlayback(args: {
@@ -62,8 +56,8 @@ export function useSequencePlayback(args: {
   const keysRef = useRef(args.keys);
   keysRef.current = args.keys;
 
-  // Prefetch only while playing. A range-selected pause used to keep this
-  // loop alive, hammering /nav/at every 80ms even after the user stopped.
+  // Prefetch the nearest missing frames only. Waiting on the whole window used
+  // to stall the playhead whenever a far frame was slow.
   useEffect(() => {
     if (!args.enabled || !playing || !args.path || !rangeReady(start, end) || keysKey.length === 0) {
       return;
@@ -71,6 +65,7 @@ export function useSequencePlayback(args: {
     const anchor = args.path;
     const gamut = args.gamut;
     let cancelled = false;
+    let pinned: string[] = [];
 
     const fill = async () => {
       while (!cancelled) {
@@ -79,29 +74,32 @@ export function useSequencePlayback(args: {
         const from = sequence.playhead ?? sequence.start!;
         const keys = keysRef.current;
         const last = Math.min(from + PREFETCH, sequence.end!);
-        const jobs: number[] = [];
-        for (let index = from; index <= last; index += 1) jobs.push(index);
-        await mapPool(jobs, PREFETCH_CONCURRENCY, async (index) => {
+        const windowUrls: string[] = [];
+        let nearestMissing: string[] | null = null;
+        for (let index = from; index <= last; index += 1) {
           if (cancelled) return;
-          const file = await fileAt(anchor, index);
+          const file = await loadSibling(anchor, index);
           if (cancelled) return;
           const urls = urlsFor(file.path, keys, gamut);
-          if (urls.every(isImageReady)) return;
-          await ensureUrls(urls);
-        });
+          windowUrls.push(...urls);
+          if (nearestMissing === null && !urls.every(isImageReady)) nearestMissing = urls;
+        }
+        pinned = syncPins(pinned, windowUrls);
         if (cancelled) return;
-        await sleep(80);
+        if (nearestMissing) await ensureUrls(nearestMissing);
+        else await sleep(50);
       }
     };
 
     void fill();
     return () => {
       cancelled = true;
+      pinned = syncPins(pinned, []);
     };
   }, [args.enabled, args.path, args.gamut, keysKey, start, end, playing]);
 
-  // Advance only after the next frame's bitmaps are in the shared cache.
-  // Slow renders drop effective fps instead of skipping or flashing a spinner.
+  // Advance one playhead per painted frame. Cached frames used to resolve in the
+  // same turn; React batched those updates and the UI jumped several files.
   useEffect(() => {
     if (!args.enabled || !playing || !args.path || !rangeReady(start, end)) return;
     const anchor = args.path;
@@ -111,6 +109,22 @@ export function useSequencePlayback(args: {
     let due = performance.now() + frameMs;
 
     const tick = async () => {
+      const opening = useCompareStore.getState().sequence;
+      const head = opening.playhead ?? opening.start!;
+      try {
+        const current = await loadSibling(anchor, head);
+        if (stopped) return;
+        useCompareStore.getState().setSequence({
+          playhead: head,
+          playPath: current.path,
+          playName: current.name,
+        });
+        await nextPaint();
+      } catch {
+        useCompareStore.getState().setSequence({ playing: false });
+        return;
+      }
+
       while (!stopped) {
         const sequence = useCompareStore.getState().sequence;
         if (!sequence.playing || !rangeReady(sequence.start, sequence.end)) return;
@@ -121,22 +135,27 @@ export function useSequencePlayback(args: {
         }
         const next = current + 1;
         try {
-          const file = await fileAt(anchor, next);
+          const file = await loadSibling(anchor, next);
           const urls = urlsFor(file.path, keysRef.current, gamut);
           if (!urls.every(isImageReady)) await ensureUrls(urls);
+          if (stopped) return;
+          const wait = due - performance.now();
+          if (wait > 0) await sleep(wait);
+          if (stopped) return;
+          const latest = useCompareStore.getState().sequence;
+          if (!latest.playing) return;
+          useCompareStore.getState().setSequence({
+            playhead: next,
+            playPath: file.path,
+            playName: file.name,
+          });
+          await nextPaint();
+          due += frameMs;
+          if (due < performance.now()) due = performance.now() + frameMs;
         } catch {
           useCompareStore.getState().setSequence({ playing: false });
           return;
         }
-        if (stopped) return;
-        const wait = due - performance.now();
-        if (wait > 0) await sleep(wait);
-        if (stopped) return;
-        const latest = useCompareStore.getState().sequence;
-        if (!latest.playing) return;
-        useCompareStore.getState().setSequence({ playhead: next });
-        due += frameMs;
-        if (due < performance.now() - frameMs) due = performance.now() + frameMs;
       }
     };
 

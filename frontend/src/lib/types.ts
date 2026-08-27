@@ -149,6 +149,7 @@ export interface VideoExportRequest {
     tile_height: number;
     natural_sizes: { width: number; height: number }[];
   };
+  save_dir?: string;
 }
 
 export interface VideoJobInfo {
@@ -158,6 +159,7 @@ export interface VideoJobInfo {
   total: number;
   error: string | null;
   filename: string | null;
+  saved_path: string | null;
 }
 
 export interface ServerSettings {

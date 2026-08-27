@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { dirname } from "../../lib/format";
 import type { CompareLayout, Gamut, VideoCrop, VideoExportRequest } from "../../lib/types";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
 import type { Viewport } from "../../store/useCompareStore";
@@ -44,10 +45,11 @@ export function ExportDialog({
   const [crop, setCrop] = useState<VideoCrop>("full");
   const [maxSize, setMaxSize] = useState("1920");
   const [exportFps, setExportFps] = useState(String(fps));
+  const [saveDir, setSaveDir] = useState(dirname(path));
   const [confirmLarge, setConfirmLarge] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<Error | null>(null);
-  const downloaded = useRef(false);
+  const [copied, setCopied] = useState(false);
 
   const frameCount = end - start + 1;
   const needsConfirm = frameCount > SOFT_LIMIT;
@@ -72,19 +74,11 @@ export function ExportDialog({
       : jobQuery.error instanceof Error
         ? jobQuery.error
         : null;
-
-  useEffect(() => {
-    if (job?.status !== "done" || !jobId || downloaded.current) return;
-    downloaded.current = true;
-    const link = document.createElement("a");
-    link.href = api.videoFileUrl(jobId);
-    link.download = job.filename ?? "compare.mp4";
-    link.click();
-    onClose();
-  }, [job?.status, job?.filename, jobId, onClose]);
+  const done = job?.status === "done";
 
   const startExport = () => {
     setSubmitError(null);
+    setCopied(false);
     const parsedFps = Number(exportFps);
     const body: VideoExportRequest = {
       path,
@@ -107,6 +101,7 @@ export function ExportDialog({
       equal_height: equalHeight,
       confirm_large: confirmLarge,
       gamut,
+      save_dir: saveDir.trim() || dirname(path),
       viewport:
         crop === "viewport"
           ? {
@@ -171,6 +166,20 @@ export function ExportDialog({
           />
         </label>
 
+        <label className="block">
+          <span className="mb-1 block text-zinc-500">保存到目录（服务器路径）</span>
+          <input
+            data-testid="export-save-dir"
+            value={saveDir}
+            onChange={(event) => setSaveDir(event.target.value)}
+            disabled={busy}
+            className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-[11px] text-zinc-200"
+          />
+          <p className="mt-1 text-[10px] text-zinc-600">
+            写成磁盘路径，不经过浏览器文件选择器。无界面环境也能写完。
+          </p>
+        </label>
+
         {needsConfirm && (
           <Checkbox
             checked={confirmLarge}
@@ -190,8 +199,41 @@ export function ExportDialog({
           </div>
         )}
 
+        {done && (
+          <div className="space-y-2 rounded border border-zinc-800 bg-zinc-950 p-2 text-zinc-300">
+            <p>已写入</p>
+            <p data-testid="export-saved-path" className="break-all font-mono text-[11px] text-cyan-300">
+              {job.saved_path ?? job.filename}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {job.saved_path && (
+                <Button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(job.saved_path!).then(() => {
+                      setCopied(true);
+                      window.setTimeout(() => setCopied(false), 1500);
+                    });
+                  }}
+                >
+                  {copied ? "已复制" : "复制路径"}
+                </Button>
+              )}
+              {jobId && (
+                <a
+                  href={api.videoFileUrl(jobId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800"
+                >
+                  在浏览器中打开
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
-          {busy && job?.status !== "done" ? (
+          {busy && job?.status !== "done" && job?.status !== "error" && job?.status !== "cancelled" ? (
             <Button
               onClick={() => {
                 if (jobId) void api.cancelVideoJob(jobId);

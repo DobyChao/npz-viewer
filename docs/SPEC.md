@@ -213,7 +213,7 @@ backend/
 | GET | `/api/nav/locate` | `path` | `{path,name,index,total}` |
 | GET | `/api/nav/at` | `path, index` | 该目录自然序第 `index` 个 npz（0 起）；越界 400 |
 | POST | `/api/video/export` | 见 §6.6 | `{id,status,current,total}` |
-| GET | `/api/video/jobs/{id}` | — | `{id,status,current,total,error,filename}` |
+| GET | `/api/video/jobs/{id}` | — | `{id,status,current,total,error,filename,saved_path}` |
 | POST | `/api/video/jobs/{id}/cancel` | — | 更新后的 job |
 | GET | `/api/video/jobs/{id}/file` | — | `video/mp4` 下载；未完成 404 |
 
@@ -381,7 +381,7 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 | `←` / `→` | 同目录上一个 / 下一个 npz |
 | `↑` / `↓` | 兄弟文件夹中相同序号的 npz（上/下一个文件夹） |
 | `空格` | A/B toggle 切换 |
-| `P` | 文件内对比且已选起止帧时，播放/暂停序列；跨文件或未选区间时忽略 |
+| `P` | 文件内对比且已选起止帧时，进入序列并播放/暂停；跨文件或未选区间时忽略 |
 | `1`~`4` | 单独查看第 n 个 tile |
 | `F` | 对比面板占满 / 还原 |
 | `Ctrl+0` | 适应窗口 |
@@ -397,10 +397,11 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 
 **播放**
 
+- 对比图由谁驱动要显式切换：默认跟随文件列表；进入序列后跟随 playhead。胶片按钮进入/退出；播放或拖 scrubber 会自动进入。点列表里另一个 npz、或切目录，退出序列，对比立刻回到该文件。
 - 必须先选起止帧（闭区间，0 起的目录序号），不默认跑整个文件夹。
-- playhead 只改对比瓦片用的 path，**不** `jumpToFile`，文件列表保持原选中项。暂停后可「定位到当前帧」。
-- 播放中可继续平移缩放；空格仍是 A/B。播到结束帧后停止，停在最后一帧；再按播放从起始帧重来。
-- 仅播放中预取后续帧到内存；暂停或播完后停止。下一帧未就绪则等待（降低有效 fps），不跳帧、不盖加载转圈。
+- 序列模式中 playhead 只改对比瓦片用的 path，**不** `jumpToFile`，文件列表保持原选中项。暂停后可「定位到当前帧」。←/→ 在序列模式暂停时步进 playhead。
+- 播放中可继续平移缩放；空格仍是 A/B。播到结束帧后停止，停在最后一帧（仍留在序列模式）；再按播放从起始帧重来。
+- 仅播放中预取后续帧到内存并钉住；暂停或退出后停止。每一帧等上一帧画完再切，缓存命中也不跳帧。下一帧未就绪则等待（降低有效 fps），不盖加载转圈。
 - 新文件没有某 key：该格 KEY NOT FOUND 占位，不塌布局。
 
 **导出**
@@ -409,14 +410,14 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 - 两种裁剪：`full` 完整原图（等高跟随面板开关）；`viewport` 按对比面板当前缩放/平移裁，公式与像素读数一致：`effective = scale * scaleFactor`，`src = (-x/effective, -y/effective, tileW/effective, tileH/effective)`。
 - 长边上限 1080 / 1920 / 2160（默认 1920）。FPS 默认 12，范围 1–60。
 - 软上限 2000 帧（需 `confirm_large`），硬上限 10000。
-- ffmpeg 经 `imageio-ffmpeg` 捆绑，不依赖系统安装。成品放 cache 目录，浏览器下载。
+- ffmpeg 经 `imageio-ffmpeg` 捆绑，不依赖系统安装。默认写到序列所在目录（`save_dir`，须在 root 内），任务返回 `saved_path`。浏览器下载可选，不自动弹出另存为。
 
 `POST /api/video/export` body：
 
 ```
 path, keys:[{key, batch, layout, channel, normalize, colormap, alpha, gainmap_gamut}],
 gamut, start, end, fps, layout, crop: full|viewport, max_size, equal_height,
-confirm_large, viewport?: {scale,x,y,tile_width,tile_height,natural_sizes:[{width,height}]}
+confirm_large, save_dir?, viewport?: {scale,x,y,tile_width,tile_height,natural_sizes:[{width,height}]}
 ```
 
 ---

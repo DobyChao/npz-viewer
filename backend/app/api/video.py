@@ -49,4 +49,5 @@ async def job_file(job_id: str) -> FileResponse:
         job.output_path,
         media_type="video/mp4",
         filename=job.filename or f"{job.id}.mp4",
+        content_disposition_type="inline",
     )

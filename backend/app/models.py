@@ -177,6 +177,7 @@ class VideoExportRequest(BaseModel):
     confirm_large: bool = False
     gamut: Gamut = "bt2020"
     viewport: ViewportSpec | None = None
+    save_dir: str | None = None
 
 
 class VideoJobInfo(BaseModel):
@@ -186,3 +187,4 @@ class VideoJobInfo(BaseModel):
     total: int = 0
     error: str | None = None
     filename: str | None = None
+    saved_path: str | None = None

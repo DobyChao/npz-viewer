@@ -82,6 +82,10 @@ def test_export_job_writes_an_mp4(client: TestClient, frame: Path) -> None:
     assert body["status"] == "done", body
     assert body["total"] == 2
     assert body["current"] == 2
+    saved = Path(body["saved_path"])
+    assert saved.is_file()
+    assert saved.parent == frame.parent
+    assert saved.read_bytes()[:32].find(b"ftyp") != -1
 
     download = client.get(f"/api/video/jobs/{job_id}/file")
     assert download.status_code == 200
@@ -115,6 +119,22 @@ def test_export_viewport_crop(client: TestClient, frame: Path) -> None:
     assert response.status_code == 200, response.text
     body = _wait_job(client, response.json()["id"])
     assert body["status"] == "done", body
+
+
+def test_export_save_dir_must_stay_inside_a_root(client: TestClient, frame: Path, tmp_path: Path) -> None:
+    response = client.post(
+        "/api/video/export",
+        json={
+            "path": frame.as_posix(),
+            "keys": [{"key": "rgb_hwc"}],
+            "start": 0,
+            "end": 0,
+            "fps": 8,
+            "max_size": 1080,
+            "save_dir": (tmp_path / "outside").as_posix(),
+        },
+    )
+    assert response.status_code == 403
 
 
 def test_export_rejects_unconfirmed_huge_range(client: TestClient, frame: Path) -> None:

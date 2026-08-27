@@ -95,28 +95,20 @@ export function ComparePanel() {
   const sequence = useCompareStore((state) => state.sequence);
   const gamut = useAppStore((state) => state.gamut);
 
-  const { data: playFile } = useQuery({
-    queryKey: ["nav-at", path, sequence.playhead],
-    queryFn: () => api.navAt(path!, sequence.playhead!),
-    enabled: Boolean(path) && mode === "inside" && sequence.playhead !== null,
-    placeholderData: keepPreviousData,
-  });
-
-  const tilePath = mode === "inside" && playFile?.path ? playFile.path : path;
+  const sequenceDriving =
+    mode === "inside" && sequence.engaged && sequence.playhead !== null && Boolean(sequence.playPath);
+  const tilePath = sequenceDriving ? sequence.playPath : path;
   const { data: playMeta } = useQuery({
     queryKey: ["npz-meta", tilePath],
     queryFn: () => api.meta(tilePath!),
-    enabled: Boolean(tilePath) && mode === "inside",
+    enabled: Boolean(tilePath) && mode === "inside" && !sequence.playing,
     placeholderData: keepPreviousData,
   });
   const tileMeta = playMeta ?? meta;
-  const tileVersion =
-    mode === "inside" && sequence.playhead !== null
-      ? ""
-      : tileMeta
-        ? versionOf(tileMeta)
-        : version;
-  const tileName = playFile?.name ?? tileMeta?.name ?? meta?.name ?? "";
+  const tileVersion = sequenceDriving ? "" : tileMeta ? versionOf(tileMeta) : version;
+  const tileName = sequenceDriving
+    ? (sequence.playName ?? tileMeta?.name ?? meta?.name ?? "")
+    : (tileMeta?.name ?? meta?.name ?? "");
 
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [naturalSizes, setNaturalSizes] = useState<Record<string, ImageSize>>({});

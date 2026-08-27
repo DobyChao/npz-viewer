@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Download, Pause, Play, Locate } from "lucide-react";
+import { Download, Film, Pause, Play, Locate } from "lucide-react";
 import { api } from "../../lib/api";
 import { dirname } from "../../lib/format";
+import { loadSibling, peekSibling } from "../../lib/navCache";
 import { useHotkeys } from "../../hooks/useHotkeys";
 import { rangeReady, useSequencePlayback } from "../../hooks/useSequencePlayback";
 import { useAppStore } from "../../store/useAppStore";
@@ -34,19 +35,32 @@ export function SequenceBar({
   const sequence = useCompareStore((state) => state.sequence);
   const setSequence = useCompareStore((state) => state.setSequence);
   const resetSequence = useCompareStore((state) => state.resetSequence);
-  const togglePlayback = useCompareStore((state) => state.togglePlayback);
+  const exitSequence = useCompareStore((state) => state.exitSequence);
   const jumpToFile = useAppStore((state) => state.jumpToFile);
   const [exportOpen, setExportOpen] = useState(false);
 
   const dir = dirname(path);
   const prevDir = useRef(dir);
+  const prevPath = useRef(path);
+
   useEffect(() => {
     if (prevDir.current === dir) return;
     prevDir.current = dir;
+    prevPath.current = path;
     resetSequence();
-  }, [dir, resetSequence]);
+  }, [dir, path, resetSequence]);
 
-  useSequencePlayback({ path, keys, gamut, enabled: keys.length > 0 });
+  // File-list click changes `path`. Locate sets it to playPath and must stay engaged.
+  useEffect(() => {
+    if (prevPath.current === path) return;
+    prevPath.current = path;
+    const current = useCompareStore.getState().sequence;
+    if (!current.engaged) return;
+    if (current.playPath && path === current.playPath) return;
+    exitSequence();
+  }, [path, exitSequence]);
+
+  useSequencePlayback({ path, keys, gamut, enabled: keys.length > 0 && sequence.engaged });
 
   const locateQuery = useQuery({
     queryKey: ["nav-locate", path],
@@ -57,31 +71,94 @@ export function SequenceBar({
 
   const startName = useQuery({
     queryKey: ["nav-at", path, sequence.start],
-    queryFn: () => api.navAt(path, sequence.start!),
+    queryFn: () => loadSibling(path, sequence.start!),
     enabled: sequence.start !== null,
   });
   const endName = useQuery({
     queryKey: ["nav-at", path, sequence.end],
-    queryFn: () => api.navAt(path, sequence.end!),
+    queryFn: () => loadSibling(path, sequence.end!),
     enabled: sequence.end !== null,
   });
   const playName = useQuery({
     queryKey: ["nav-at", path, sequence.playhead],
-    queryFn: () => api.navAt(path, sequence.playhead!),
-    enabled: sequence.playhead !== null,
+    queryFn: () => loadSibling(path, sequence.playhead!),
+    enabled: sequence.engaged && sequence.playhead !== null && !sequence.playName,
   });
 
-  const canPlay = rangeReady(sequence.start, sequence.end);
-  const canExport = canPlay && keys.length > 0;
+  const canExport = rangeReady(sequence.start, sequence.end) && keys.length > 0;
+
+  const seekTo = (index: number, playing: boolean) => {
+    const cached = peekSibling(path, index);
+    setSequence({
+      engaged: true,
+      playing,
+      playhead: index,
+      playPath: cached?.path ?? null,
+      playName: cached?.name ?? null,
+    });
+    if (cached) return;
+    void loadSibling(path, index).then((file) => {
+      const latest = useCompareStore.getState().sequence;
+      if (latest.engaged && latest.playhead === index) {
+        setSequence({ playPath: file.path, playName: file.name });
+      }
+    });
+  };
+
+  const enterSequence = () => {
+    const index = locateQuery.data?.index ?? 0;
+    const name = locateQuery.data?.name ?? null;
+    setSequence({
+      engaged: true,
+      playing: false,
+      playhead: index,
+      playPath: path,
+      playName: name,
+    });
+  };
+
+  const playOrPause = () => {
+    const current = useCompareStore.getState().sequence;
+    if (!rangeReady(current.start, current.end)) return;
+    if (current.playing) {
+      setSequence({ playing: false });
+      return;
+    }
+    const atEnd = current.playhead !== null && current.playhead >= current.end!;
+    const nextHead =
+      !current.engaged ||
+      current.playhead === null ||
+      current.playhead < current.start! ||
+      current.playhead > current.end! ||
+      atEnd
+        ? current.start!
+        : current.playhead;
+    seekTo(nextHead, true);
+  };
+
+  const stepPlayhead = (delta: number) => {
+    const current = useCompareStore.getState().sequence;
+    if (!current.engaged || current.playing || !rangeReady(current.start, current.end)) return;
+    const from = current.playhead ?? current.start!;
+    const next = Math.min(current.end!, Math.max(current.start!, from + delta));
+    if (next === from) return;
+    seekTo(next, false);
+  };
 
   useHotkeys(
     {
       p: () => {
-        if (canPlay) togglePlayback();
+        if (rangeReady(sequence.start, sequence.end)) playOrPause();
       },
       P: () => {
-        if (canPlay) togglePlayback();
+        if (rangeReady(sequence.start, sequence.end)) playOrPause();
       },
+      ...(sequence.engaged
+        ? {
+            ArrowLeft: () => stepPlayhead(-1),
+            ArrowRight: () => stepPlayhead(1),
+          }
+        : {}),
     },
     keys.length > 0,
   );
@@ -100,14 +177,34 @@ export function SequenceBar({
   return (
     <div
       data-testid="sequence-bar"
-      className="flex h-8 shrink-0 items-center gap-2 border-t border-zinc-800 bg-zinc-900/80 px-3 text-[11px] text-zinc-400"
+      data-engaged={sequence.engaged ? "true" : "false"}
+      className={`flex h-8 shrink-0 items-center gap-2 border-t px-3 text-[11px] ${
+        sequence.engaged
+          ? "border-cyan-800 bg-cyan-950/40 text-zinc-300"
+          : "border-zinc-800 bg-zinc-900/80 text-zinc-400"
+      }`}
     >
+      <IconButton
+        title={sequence.engaged ? "退出序列（对比跟随文件列表）" : "进入序列（对比跟随 playhead）"}
+        data-testid="sequence-engage"
+        active={sequence.engaged}
+        onClick={() => {
+          if (sequence.engaged) exitSequence();
+          else enterSequence();
+        }}
+      >
+        <Film size={13} />
+      </IconButton>
+      <span className="shrink-0 font-medium" data-testid="sequence-source">
+        {sequence.engaged ? "序列" : "列表"}
+      </span>
+
       <IconButton
         title={sequence.playing ? "暂停（P）" : "播放（P）"}
         data-testid="sequence-play"
-        disabled={!canPlay}
+        disabled={!rangeReady(sequence.start, sequence.end)}
         active={sequence.playing}
-        onClick={togglePlayback}
+        onClick={playOrPause}
       >
         {sequence.playing ? <Pause size={13} /> : <Play size={13} />}
       </IconButton>
@@ -149,19 +246,20 @@ export function SequenceBar({
       <input
         data-testid="sequence-scrubber"
         type="range"
-        disabled={!canPlay}
+        disabled={!rangeReady(sequence.start, sequence.end)}
         min={sequence.start ?? 0}
         max={sequence.end ?? 0}
         value={sequence.playhead ?? sequence.start ?? 0}
-        onChange={(event) =>
-          setSequence({ playhead: Number(event.target.value), playing: false })
-        }
+        onChange={(event) => seekTo(Number(event.target.value), false)}
         className="h-1 min-w-16 flex-1 accent-cyan-500"
       />
 
       <span data-testid="sequence-playhead" className="shrink-0 font-mono text-zinc-500 tabular-nums">
-        {playName.data?.name ?? locateQuery.data?.name ?? "—"} ·{" "}
-        {(sequence.playhead ?? currentIndex) + 1}/{total || "—"}
+        {sequence.engaged
+          ? (sequence.playName ?? playName.data?.name ?? locateQuery.data?.name ?? "—")
+          : (locateQuery.data?.name ?? "—")}{" "}
+        · {(sequence.engaged ? (sequence.playhead ?? currentIndex) : currentIndex) + 1}/
+        {total || "—"}
       </span>
 
       <label className="flex items-center gap-1">
@@ -182,9 +280,12 @@ export function SequenceBar({
 
       <Button
         title="把文件列表跳到 playhead 对应的 npz"
-        disabled={sequence.playhead === null || !playName.data}
+        disabled={!sequence.engaged || sequence.playhead === null || !(sequence.playPath || playName.data)}
         onClick={() => {
-          if (playName.data) jumpToFile(playName.data.path, playName.data.index);
+          const file = sequence.playPath
+            ? { path: sequence.playPath, index: sequence.playhead! }
+            : playName.data;
+          if (file) jumpToFile(file.path, file.index);
         }}
       >
         <Locate size={12} /> 定位
