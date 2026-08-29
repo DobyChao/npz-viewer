@@ -6,7 +6,7 @@ import { api } from "./lib/api";
 import { useHotkeys } from "./hooks/useHotkeys";
 import { useNpzNavigation } from "./hooks/useNpzNavigation";
 import { useAppStore } from "./store/useAppStore";
-import { useCompareStore } from "./store/useCompareStore";
+import { canEnableRatio, useCompareStore } from "./store/useCompareStore";
 import { FolderTree } from "./components/FolderTree";
 import { NpzInfo } from "./components/NpzInfo";
 import { NpzList } from "./components/NpzList";
@@ -74,9 +74,11 @@ export default function App() {
   const setToggleIndex = useCompareStore((state) => state.setToggleIndex);
   const requestFit = useCompareStore((state) => state.requestFit);
   const requestActualSize = useCompareStore((state) => state.requestActualSize);
-  const tileCount = useCompareStore((state) =>
-    state.mode === "cross" ? state.items.length : state.insideKeys.length,
-  );
+  const toggleRatio = useCompareStore((state) => state.toggleRatio);
+  const tileCount = useCompareStore((state) => {
+    const source = state.mode === "cross" ? state.items.length : state.insideKeys.length;
+    return source + (state.ratioEnabled && canEnableRatio(source) ? 1 : 0);
+  });
 
   const mainLayout = useDefaultLayout({ id: "npzview.main", panelIds: ["left", "right"] });
   const leftLayout = useDefaultLayout({ id: "npzview.left", panelIds: ["tree", "list"] });
@@ -175,6 +177,8 @@ export default function App() {
       "2": () => tileCount > 1 && setToggleIndex(1),
       "3": () => tileCount > 2 && setToggleIndex(2),
       "4": () => tileCount > 3 && setToggleIndex(3),
+      g: () => toggleRatio(),
+      G: () => toggleRatio(),
       f: () => setPanel(panel === "full" ? "split" : "full"),
       F: () => setPanel(panel === "full" ? "split" : "full"),
       "ctrl+0": requestFit,

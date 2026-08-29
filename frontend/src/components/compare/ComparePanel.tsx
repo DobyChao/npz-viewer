@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
+  ArrowLeftRight,
   ArrowUpDown,
   ChevronDown,
   ChevronLeft,
@@ -21,9 +22,9 @@ import { isTypingTarget } from "../../hooks/useHotkeys";
 import { useCurrentNpz } from "../../hooks/useCurrentNpz";
 import { useNpzNavigation } from "../../hooks/useNpzNavigation";
 import { useAppStore } from "../../store/useAppStore";
-import { useCompareStore } from "../../store/useCompareStore";
+import { canEnableRatio, useCompareStore } from "../../store/useCompareStore";
+import type { CompareLayout, VideoExportKey } from "../../lib/types";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
-import type { CompareLayout } from "../../lib/types";
 import { Button, EmptyState, IconButton, SectionHeader, Select } from "../ui";
 import { CompareTile } from "./CompareTile";
 import type { TileSpec } from "./CompareTile";
@@ -80,6 +81,10 @@ export function ComparePanel() {
   const lightbox = useAppStore((state) => state.lightbox);
   const equalHeight = useCompareStore((state) => state.equalHeight);
   const setEqualHeight = useCompareStore((state) => state.setEqualHeight);
+  const ratioEnabled = useCompareStore((state) => state.ratioEnabled);
+  const ratioSwapped = useCompareStore((state) => state.ratioSwapped);
+  const toggleRatio = useCompareStore((state) => state.toggleRatio);
+  const setRatioSwapped = useCompareStore((state) => state.setRatioSwapped);
   const setOverlayEnabled = useCompareStore((state) => state.setOverlayEnabled);
   const setOverlaySource = useCompareStore((state) => state.setOverlaySource);
   const setOverlayPeek = useCompareStore((state) => state.setOverlayPeek);
@@ -148,11 +153,35 @@ export function ComparePanel() {
     });
   }, [mode, items, insideKeys, path, meta, version, tileMeta, tilePath, tileName, tileVersion]);
 
-  const signature = tiles.map((tile) => tile.id).join("|");
-  const visibleTiles = toggleIndex !== null && tiles.length > 0 ? [tiles[toggleIndex % tiles.length]] : tiles;
+  const ratioAllowed = canEnableRatio(tiles.length);
+  const displayTiles = useMemo<TileSpec[]>(() => {
+    if (!ratioEnabled || !ratioAllowed) return tiles;
+    const num = ratioSwapped ? tiles[0] : tiles[1];
+    const den = ratioSwapped ? tiles[1] : tiles[0];
+    return [
+      ...tiles,
+      {
+        id: `ratio::${num.id}::${den.id}`,
+        key: `${num.key} ÷ ${den.key}`,
+        npzPath: num.npzPath,
+        npzName: num.npzPath === den.npzPath ? num.npzName : `${num.npzName} / ${den.npzName}`,
+        version: `${num.version}|${den.version}`,
+        options: DEFAULT_VIEW_OPTIONS,
+        missing: num.missing || den.missing,
+        removable: true,
+        derived: { num, den },
+      },
+    ];
+  }, [tiles, ratioEnabled, ratioAllowed, ratioSwapped]);
+
+  const signature = displayTiles.map((tile) => tile.id).join("|");
+  const visibleTiles =
+    toggleIndex !== null && displayTiles.length > 0
+      ? [displayTiles[toggleIndex % displayTiles.length]]
+      : displayTiles;
   const effectiveLayout = resolveLayout(layout, visibleTiles.length);
 
-  // Overlay is available whenever two tiles sit side by side. Hold X to overlay
+  // Overlay is available whenever two source tiles sit side by side. Hold X to overlay
   // (default); click the button to lock it on, then hold X to peek underneath.
   const overlayAvailable = tiles.length >= 2 && toggleIndex === null && panel !== "hidden";
   const overlaySourceIndex = overlayAvailable ? Math.min(overlaySource, tiles.length - 1) : null;
@@ -246,12 +275,12 @@ export function ComparePanel() {
   useEffect(() => {
     if (signature === seenSignatureRef.current) return;
     seenSignatureRef.current = signature;
-    const live = new Set(tiles.map((tile) => tile.id));
+    const live = new Set(displayTiles.map((tile) => tile.id));
     setNaturalSizes((previous) => {
       const kept = Object.entries(previous).filter(([id]) => live.has(id));
       return kept.length === Object.keys(previous).length ? previous : Object.fromEntries(kept);
     });
-  }, [signature, tiles]);
+  }, [signature, displayTiles]);
 
   // Refit on a change of the reference image's dimensions only. Stepping through files
   // of the same resolution is the main comparison workflow and has to preserve the zoom.
@@ -294,8 +323,23 @@ export function ComparePanel() {
       const now = performance.now();
       if (now - lastPixelFetch.current < PIXEL_THROTTLE_MS) return;
       lastPixelFetch.current = now;
-      void api
-        .pixel(spec.npzPath, spec.key, x, y, spec.options.batch)
+      const request = spec.derived
+        ? api.ratioPixel({
+            num: {
+              path: spec.derived.num.npzPath,
+              key: spec.derived.num.key,
+              options: spec.derived.num.options,
+            },
+            den: {
+              path: spec.derived.den.npzPath,
+              key: spec.derived.den.key,
+              options: spec.derived.den.options,
+            },
+            x,
+            y,
+          })
+        : api.pixel(spec.npzPath, spec.key, x, y, spec.options.batch);
+      void request
         .then((result) => setReadout({ x, y, values: result.values }))
         .catch(() => setReadout(null));
     },
@@ -303,6 +347,10 @@ export function ComparePanel() {
   );
 
   const removeTile = (tile: TileSpec) => {
+    if (tile.derived) {
+      toggleRatio();
+      return;
+    }
     if (mode === "cross") removeItem(tile.id);
     else toggleInsideKey(tile.key);
   };
@@ -395,6 +443,35 @@ export function ComparePanel() {
           </Button>
 
           <Button
+            title={
+              tiles.length >= 4
+                ? "已有 4 张源图，无法再加比值格"
+                : tiles.length < 2
+                  ? "至少两张图才能算比值"
+                  : ratioEnabled
+                    ? "关掉临时比值格（G）"
+                    : "用第 2 格 ÷ 第 1 格生成临时 gainmap（G）"
+            }
+            data-testid="ratio-toggle"
+            data-swapped={ratioSwapped ? "true" : "false"}
+            active={ratioEnabled && ratioAllowed}
+            disabled={!ratioAllowed}
+            onClick={() => toggleRatio()}
+          >
+            ÷ 比值
+          </Button>
+          {ratioEnabled && ratioAllowed && (
+            <IconButton
+              title="互换分子分母"
+              data-testid="ratio-swap"
+              active={ratioSwapped}
+              onClick={() => setRatioSwapped(!ratioSwapped)}
+            >
+              <ArrowLeftRight size={13} />
+            </IconButton>
+          )}
+
+          <Button
             title="等高：把各图等比缩放到与第 1 格相同的显示高度，尺寸不同时才有意义"
             data-testid="equal-height-toggle"
             active={equalHeight}
@@ -461,7 +538,11 @@ export function ComparePanel() {
                 (overlayEnabled || overlayVisible)
               }
               onPickOverlaySource={
-                overlaySourceIndex !== null && index > 0 && index !== overlaySourceIndex
+                overlaySourceIndex !== null &&
+                !tile.derived &&
+                index > 0 &&
+                index < tiles.length &&
+                index !== overlaySourceIndex
                   ? () => setOverlaySource(index)
                   : undefined
               }
@@ -485,8 +566,43 @@ export function ComparePanel() {
             const tile = gridRef.current?.firstElementChild as HTMLElement | null;
             return { width: tile?.clientWidth ?? 0, height: tile?.clientHeight ?? 0 };
           }}
-          naturalSizes={insideKeys.map(
-            (key) => naturalSizes[`inside::${key}`] ?? { width: 0, height: 0 },
+          naturalSizes={displayTiles.map(
+            (tile) => naturalSizes[tile.id] ?? { width: 0, height: 0 },
+          )}
+          ratio={
+            ratioEnabled && ratioAllowed && tiles.length >= 2
+              ? {
+                  num: ratioSwapped ? tiles[0].key : tiles[1].key,
+                  den: ratioSwapped ? tiles[1].key : tiles[0].key,
+                }
+              : null
+          }
+          exportCells={displayTiles.map((tile): VideoExportKey =>
+            tile.derived
+              ? {
+                  type: "ratio",
+                  key: tile.key,
+                  key_num: tile.derived.num.key,
+                  key_den: tile.derived.den.key,
+                  batch: DEFAULT_VIEW_OPTIONS.batch,
+                  layout: "auto",
+                  channel: DEFAULT_VIEW_OPTIONS.channel,
+                  normalize: DEFAULT_VIEW_OPTIONS.normalize,
+                  colormap: DEFAULT_VIEW_OPTIONS.colormap,
+                  alpha: DEFAULT_VIEW_OPTIONS.alpha,
+                  gainmap_gamut: DEFAULT_VIEW_OPTIONS.gainmapGamut,
+                }
+              : {
+                  type: "key",
+                  key: tile.key,
+                  batch: tile.options.batch,
+                  layout: tile.options.layout ?? "auto",
+                  channel: tile.options.channel,
+                  normalize: tile.options.normalize,
+                  colormap: tile.options.colormap,
+                  alpha: tile.options.alpha,
+                  gainmap_gamut: tile.options.gainmapGamut,
+                },
           )}
         />
       )}
@@ -496,9 +612,9 @@ export function ComparePanel() {
           <button
             type="button"
             className="text-cyan-400"
-            onClick={() => advanceToggle(tiles.length)}
+            onClick={() => advanceToggle(displayTiles.length)}
           >
-            A/B {toggleIndex + 1} / {tiles.length} · 空格切换
+            A/B {toggleIndex + 1} / {displayTiles.length} · 空格切换
           </button>
         )}
         {overlaySourceIndex !== null && (
@@ -510,6 +626,11 @@ export function ComparePanel() {
               : overlayVisible
                 ? `覆盖 ${overlaySourceIndex + 1} → 1 · 松开 X 移开`
                 : `按住 X 覆盖 ${overlaySourceIndex + 1} → 1`}
+          </span>
+        )}
+        {ratioEnabled && ratioAllowed && (
+          <span data-testid="ratio-status" className="text-amber-400">
+            比值 {ratioSwapped ? "1 ÷ 2" : "2 ÷ 1"}
           </span>
         )}
         {equalHeight && referenceSize && (

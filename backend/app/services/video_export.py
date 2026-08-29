@@ -18,7 +18,7 @@ from ..config import get_roots_store, get_settings
 from ..errors import AppError, BadParam, KeyNotFound, UnsupportedKind
 from ..models import ExportKey, VideoExportRequest, VideoJobInfo
 from ..paths import resolve_within, to_posix
-from . import nav, npzio, render
+from . import nav, npzio, ratio, render
 from .render import RenderParams
 
 logger = logging.getLogger("npz_view.video")
@@ -26,6 +26,7 @@ logger = logging.getLogger("npz_view.video")
 SOFT_FRAME_LIMIT = 2000
 HARD_FRAME_LIMIT = 10000
 MAX_KEYS = 4
+MAX_CELLS = 4
 LABEL_HEIGHT = 18
 GAP = 2
 MISSING_FILL = (28, 28, 32)
@@ -219,6 +220,49 @@ def render_key_image(path: Path, spec: ExportKey, gamut: str) -> Image.Image | N
         return None
 
 
+def render_ratio_image(path: Path, spec: ExportKey, gamut: str) -> Image.Image | None:
+    params = ratio.RatioParams(
+        num=ratio.OperandParams(
+            key=spec.key_num or "",
+            batch=spec.batch,
+            layout=spec.layout,
+            channel=spec.channel,
+        ),
+        den=ratio.OperandParams(
+            key=spec.key_den or "",
+            batch=spec.batch,
+            layout=spec.layout,
+            channel=spec.channel,
+        ),
+        gamut=gamut,
+        colormap=spec.colormap,
+        gainmap_gamut=spec.gainmap_gamut,
+    )
+    try:
+        values = ratio.ratio_array(path, params.num, path, params.den)
+        return to_rgb_image(ratio.ratio_pixels(values, params))
+    except (KeyNotFound, UnsupportedKind, BadParam):
+        return None
+
+
+def render_cell_image(path: Path, spec: ExportKey, gamut: str) -> Image.Image | None:
+    if spec.type == "ratio":
+        return render_ratio_image(path, spec, gamut)
+    return render_key_image(path, spec, gamut)
+
+
+def cell_label(spec: ExportKey) -> str:
+    if spec.type == "ratio":
+        return f"{spec.key_num} ÷ {spec.key_den}"
+    return spec.key
+
+
+def cell_token(spec: ExportKey) -> str:
+    if spec.type == "ratio":
+        return f"{spec.key_num}div{spec.key_den}"
+    return spec.key
+
+
 def prepare_cells(
     images: list[Image.Image | None],
     request: VideoExportRequest,
@@ -270,8 +314,8 @@ def compose_frame(
     filename: str,
     request: VideoExportRequest,
 ) -> Image.Image:
-    images = [render_key_image(path, spec, request.gamut) for spec in request.keys]
-    labels = [f"{spec.key}  {filename}" for spec in request.keys]
+    images = [render_cell_image(path, spec, request.gamut) for spec in request.keys]
+    labels = [f"{cell_label(spec)}  {filename}" for spec in request.keys]
     cells = prepare_cells(images, request)
     rows, cols = resolve_grid(request.layout, len(request.keys))
     grid = compose_grid(cells, labels, rows, cols)
@@ -449,7 +493,10 @@ def resolve_save_dir(anchor: Path, save_dir: str | None) -> Path:
 def validate_request(request: VideoExportRequest, anchor: Path) -> int:
     if not request.keys:
         raise BadParam("至少选择一个 key")
-    if len(request.keys) > MAX_KEYS:
+    if len(request.keys) > MAX_CELLS:
+        raise BadParam(f"最多导出 {MAX_CELLS} 格")
+    source_keys = sum(1 for spec in request.keys if spec.type != "ratio")
+    if source_keys > MAX_KEYS:
         raise BadParam(f"最多导出 {MAX_KEYS} 个 key")
     if request.start > request.end:
         raise BadParam("起始帧不能大于结束帧")
@@ -538,7 +585,7 @@ def _run_job(job: VideoJob, anchor: Path, request: VideoExportRequest) -> None:
 
 def start_export(anchor: Path, request: VideoExportRequest) -> VideoJob:
     frame_count = validate_request(request, anchor)
-    keys = "-".join(item.key for item in request.keys)
+    keys = "-".join(cell_token(item) for item in request.keys)
     filename = f"{anchor.parent.name}_{keys}_{request.start}-{request.end}.mp4"
     job = jobs.create(frame_count, filename)
     thread = threading.Thread(

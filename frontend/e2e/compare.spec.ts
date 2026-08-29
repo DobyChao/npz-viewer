@@ -368,6 +368,41 @@ test("keyboard navigation walks files and sibling folders", async ({ page }) => 
   ).toHaveAttribute("data-path", /method_a\/frame_002\.npz$/);
 });
 
+test("ratio tile is tile 2 ÷ tile 1 and can be swapped", async ({ page }) => {
+  await selectSampleFrame(page);
+  await openInsideCompare(page, ["rgb_hwc", "gainmap"]);
+
+  await expect(page.getByTestId("ratio-toggle")).toBeEnabled();
+  await page.getByTestId("ratio-toggle").click();
+  await expect(page.getByTestId("compare-tile")).toHaveCount(3);
+
+  const derived = page.locator('[data-testid="compare-tile"][data-derived="true"]');
+  await expect(derived).toBeVisible();
+  await expect(derived).toContainText("gainmap ÷ rgb_hwc");
+  await expect(page.getByTestId("ratio-status")).toContainText("比值 2 ÷ 1");
+  await expect(derived.getByTestId("compare-image")).toBeVisible();
+
+  await page.getByTestId("ratio-swap").click();
+  await expect(derived).toContainText("rgb_hwc ÷ gainmap");
+  await expect(page.getByTestId("ratio-status")).toContainText("比值 1 ÷ 2");
+
+  await page.getByTestId("overlay-toggle").click();
+  await expect(page.getByTestId("overlay-status")).toContainText("覆盖 2 → 1");
+  await expect(page.getByTestId("pick-overlay-source")).toHaveCount(0);
+
+  await derived.getByTestId("remove-tile").click();
+  await expect(page.getByTestId("compare-tile")).toHaveCount(2);
+  await expect(page.getByTestId("ratio-status")).toHaveCount(0);
+});
+
+test("ratio of mixed resolutions still paints", async ({ page }) => {
+  await selectSampleFrame(page);
+  await openInsideCompare(page, ["rgb_hwc", "gainmap_half"]);
+  await page.getByTestId("ratio-toggle").click();
+  const derived = page.locator('[data-testid="compare-tile"][data-derived="true"]');
+  await expect(derived.getByTestId("compare-image")).toBeVisible();
+});
+
 test("browsing produces no console errors or failed requests", async ({ page }) => {
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];

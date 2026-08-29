@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { dirname } from "../../lib/format";
-import type { CompareLayout, Gamut, VideoCrop, VideoExportRequest } from "../../lib/types";
+import type { CompareLayout, Gamut, VideoCrop, VideoExportKey, VideoExportRequest } from "../../lib/types";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
 import type { Viewport } from "../../store/useCompareStore";
 import { Button, Checkbox, ErrorBox, Modal, Segmented, Select, Spinner } from "../ui";
@@ -18,6 +18,7 @@ const SOFT_LIMIT = 2000;
 export function ExportDialog({
   path,
   keys,
+  cells,
   start,
   end,
   fps,
@@ -31,6 +32,7 @@ export function ExportDialog({
 }: {
   path: string;
   keys: string[];
+  cells?: VideoExportKey[];
   start: number;
   end: number;
   fps: number;
@@ -82,16 +84,18 @@ export function ExportDialog({
     const parsedFps = Number(exportFps);
     const body: VideoExportRequest = {
       path,
-      keys: keys.map((key) => ({
-        key,
-        batch: DEFAULT_VIEW_OPTIONS.batch,
-        layout: "auto",
-        channel: DEFAULT_VIEW_OPTIONS.channel,
-        normalize: DEFAULT_VIEW_OPTIONS.normalize,
-        colormap: DEFAULT_VIEW_OPTIONS.colormap,
-        alpha: DEFAULT_VIEW_OPTIONS.alpha,
-        gainmap_gamut: DEFAULT_VIEW_OPTIONS.gainmapGamut,
-      })),
+      keys:
+        cells ??
+        keys.map((key) => ({
+          key,
+          batch: DEFAULT_VIEW_OPTIONS.batch,
+          layout: "auto",
+          channel: DEFAULT_VIEW_OPTIONS.channel,
+          normalize: DEFAULT_VIEW_OPTIONS.normalize,
+          colormap: DEFAULT_VIEW_OPTIONS.colormap,
+          alpha: DEFAULT_VIEW_OPTIONS.alpha,
+          gainmap_gamut: DEFAULT_VIEW_OPTIONS.gainmapGamut,
+        })),
       start,
       end,
       fps: Number.isFinite(parsedFps) ? parsedFps : fps,
@@ -126,7 +130,14 @@ export function ExportDialog({
     <Modal title="导出对比视频" onClose={onClose} width="max-w-md">
       <div className="space-y-4 text-xs">
         <p className="text-zinc-400">
-          {keys.join(" · ")} · {frameCount} 帧 · 宫格{" "}
+          {(cells ?? keys).map((cell) =>
+            typeof cell === "string"
+              ? cell
+              : cell.type === "ratio"
+                ? `${cell.key_num} ÷ ${cell.key_den}`
+                : cell.key,
+          ).join(" · ")}{" "}
+          · {frameCount} 帧 · 宫格{" "}
           <span className="font-mono text-zinc-300">{layout}</span>
         </p>
 

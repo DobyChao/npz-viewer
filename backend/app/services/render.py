@@ -85,6 +85,13 @@ def _as_hwc(array: npt.NDArray, layout: str | None) -> npt.NDArray:
     return array
 
 
+def linear_hwc(array: npt.NDArray, meta: KeyMeta, params: RenderParams) -> npt.NDArray[np.float32]:
+    """Batch-sliced, layout-resolved HWC float32, before clip / gamma."""
+    sliced = _slice_batch(array, meta, params.batch)
+    layout = _resolve_layout(meta, params.layout)
+    return _as_hwc(to_linear_float(sliced), layout)
+
+
 def _finite(array: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
     return np.nan_to_num(array, nan=0.0, posinf=1.0, neginf=0.0)
 

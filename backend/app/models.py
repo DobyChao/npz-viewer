@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 KeyKind = Literal["rgb", "rgba", "gray", "gainmap", "stack", "table", "scalar", "raw"]
 Layout = Literal["chw", "hwc"]
@@ -140,7 +140,10 @@ CompareGridLayout = Literal["auto", "1x1", "1x2", "2x1", "1x3", "3x1", "2x2"]
 
 
 class ExportKey(BaseModel):
-    key: str
+    type: Literal["key", "ratio"] = "key"
+    key: str = ""
+    key_num: str | None = None
+    key_den: str | None = None
     batch: int = 0
     layout: str = "auto"
     channel: int = 0
@@ -148,6 +151,15 @@ class ExportKey(BaseModel):
     colormap: Colormap = "none"
     alpha: AlphaMode = "composite"
     gainmap_gamut: bool = False
+
+    @model_validator(mode="after")
+    def require_identity(self) -> ExportKey:
+        if self.type == "ratio":
+            if not self.key_num or not self.key_den:
+                raise ValueError("比值格需要 key_num 和 key_den")
+        elif not self.key:
+            raise ValueError("需要 key")
+        return self
 
 
 class NaturalSize(BaseModel):

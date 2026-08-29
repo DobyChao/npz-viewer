@@ -82,6 +82,22 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
   );
 }
 
+export interface RatioOperand {
+  path: string;
+  key: string;
+  version?: string;
+  options?: Partial<ViewOptions>;
+}
+
+function operandQuery(suffix: "a" | "b", options?: Partial<ViewOptions>): Params {
+  const params: Params = {};
+  if (!options) return params;
+  if (options.layout) params[`layout_${suffix}`] = options.layout;
+  if (options.batch) params[`batch_${suffix}`] = options.batch;
+  if (options.channel) params[`channel_${suffix}`] = options.channel;
+  return params;
+}
+
 export const api = {
   settings: () => request<ServerSettings>("/settings"),
   roots: () => request<{ roots: RootInfo[] }>("/roots"),
@@ -108,6 +124,22 @@ export const api = {
     request<ArrayStats>("/npz/stats", { path, key, batch }),
   pixel: (path: string, key: string, x: number, y: number, batch = 0) =>
     request<PixelValue>("/npz/pixel", { path, key, x, y, batch }),
+  ratioPixel: (args: {
+    num: RatioOperand;
+    den: RatioOperand;
+    x: number;
+    y: number;
+  }) =>
+    request<PixelValue>("/npz/ratio/pixel", {
+      path_a: args.num.path,
+      key_a: args.num.key,
+      path_b: args.den.path,
+      key_b: args.den.key,
+      x: args.x,
+      y: args.y,
+      ...operandQuery("a", args.num.options),
+      ...operandQuery("b", args.den.options),
+    }),
 
   sibling: (path: string, scope: "file" | "folder", direction: "next" | "prev") =>
     request<SiblingResult>("/nav/sibling", { path, scope, direction }),
@@ -177,4 +209,33 @@ export function thumbUrl(args: {
     gamut: args.gamut,
     v: args.version,
   })}`;
+}
+
+/** Folded into `v=` so immutable browser cache drops old ratio PNGs after divide-rule changes. */
+const RATIO_RENDER_CACHE = "2";
+
+export function ratioRenderUrl(args: {
+  num: RatioOperand;
+  den: RatioOperand;
+  gamut: Gamut;
+  version?: string;
+  maxSize?: number;
+  format?: "png" | "webp";
+}): string {
+  const params: Params = {
+    path_a: args.num.path,
+    key_a: args.num.key,
+    path_b: args.den.path,
+    key_b: args.den.key,
+    gamut: args.num.options?.gamut ?? args.den.options?.gamut ?? args.gamut,
+    v: `${args.version ?? [args.num.version, args.den.version].filter(Boolean).join("|")}|r${RATIO_RENDER_CACHE}`,
+    ...operandQuery("a", args.num.options),
+    ...operandQuery("b", args.den.options),
+  };
+  const colormap = args.num.options?.colormap ?? args.den.options?.colormap;
+  if (colormap && colormap !== "none") params.colormap = colormap;
+  if (args.num.options?.gainmapGamut || args.den.options?.gainmapGamut) params.gainmap_gamut = true;
+  if (args.maxSize) params.max_size = args.maxSize;
+  if (args.format) params.format = args.format;
+  return `${BASE}/npz/ratio/render${toQuery(params)}`;
 }

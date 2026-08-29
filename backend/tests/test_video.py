@@ -163,6 +163,31 @@ def test_encode_rgb_frames_roundtrip(tmp_path: Path) -> None:
     assert output.stat().st_size > 32
 
 
+def test_export_includes_a_ratio_cell(client: TestClient, frame: Path) -> None:
+    response = client.post(
+        "/api/video/export",
+        json={
+            "path": frame.as_posix(),
+            "keys": [
+                {"key": "rgb_hwc"},
+                {"key": "gainmap"},
+                {"type": "ratio", "key_num": "gainmap", "key_den": "rgb_hwc"},
+            ],
+            "start": 0,
+            "end": 0,
+            "fps": 8,
+            "layout": "1x3",
+            "crop": "full",
+            "max_size": 1080,
+            "gamut": "bt2020",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = _wait_job(client, response.json()["id"])
+    assert body["status"] == "done", body
+    assert "gainmapdivrgb_hwc" in (body["filename"] or "")
+
+
 def test_missing_key_still_exports(client: TestClient, frame: Path) -> None:
     response = client.post(
         "/api/video/export",

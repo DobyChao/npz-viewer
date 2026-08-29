@@ -8,7 +8,7 @@ import { useHotkeys } from "../../hooks/useHotkeys";
 import { rangeReady, useSequencePlayback } from "../../hooks/useSequencePlayback";
 import { useAppStore } from "../../store/useAppStore";
 import { useCompareStore } from "../../store/useCompareStore";
-import type { CompareLayout, Gamut } from "../../lib/types";
+import type { CompareLayout, Gamut, VideoExportKey } from "../../lib/types";
 import { Button, IconButton } from "../ui";
 import { ExportDialog } from "./ExportDialog";
 import type { Viewport } from "../../store/useCompareStore";
@@ -22,6 +22,8 @@ export function SequenceBar({
   viewport,
   measureTile,
   naturalSizes,
+  ratio = null,
+  exportCells,
 }: {
   path: string;
   keys: string[];
@@ -31,6 +33,8 @@ export function SequenceBar({
   viewport: Viewport;
   measureTile: () => { width: number; height: number };
   naturalSizes: { width: number; height: number }[];
+  ratio?: { num: string; den: string } | null;
+  exportCells?: VideoExportKey[];
 }) {
   const sequence = useCompareStore((state) => state.sequence);
   const setSequence = useCompareStore((state) => state.setSequence);
@@ -60,7 +64,13 @@ export function SequenceBar({
     exitSequence();
   }, [path, exitSequence]);
 
-  useSequencePlayback({ path, keys, gamut, enabled: keys.length > 0 && sequence.engaged });
+  useSequencePlayback({
+    path,
+    keys,
+    gamut,
+    enabled: keys.length > 0 && sequence.engaged,
+    ratio,
+  });
 
   const locateQuery = useQuery({
     queryKey: ["nav-locate", path],
@@ -304,6 +314,7 @@ export function SequenceBar({
         <ExportDialog
           path={path}
           keys={keys}
+          cells={exportCells}
           start={sequence.start}
           end={sequence.end}
           fps={sequence.fps}

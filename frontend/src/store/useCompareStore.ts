@@ -9,6 +9,11 @@ import type {
 
 export const MAX_COMPARE_ITEMS = 4;
 
+/** Extra derived tile is allowed only when 2 or 3 source tiles are showing. */
+export function canEnableRatio(sourceCount: number): boolean {
+  return sourceCount >= 2 && sourceCount < MAX_COMPARE_ITEMS;
+}
+
 export interface CompareItem {
   id: string;
   npzPath: string;
@@ -79,6 +84,14 @@ interface CompareState {
    * preference, so it deliberately survives changing tiles.
    */
   equalHeight: boolean;
+  /**
+   * Temporary 2÷1 gainmap tile appended after the source tiles. Session-only;
+   * not written back to the npz. Survives key changes so sequence playback
+   * can keep recomputing the same pairing.
+   */
+  ratioEnabled: boolean;
+  /** When true, invert to 1÷2. Default false = tile 2 / tile 1. */
+  ratioSwapped: boolean;
   panel: ComparePanelState;
   /** Last split height of the compare pane, as a percentage of the right column. */
   splitComparePercent: number;
@@ -107,6 +120,9 @@ interface CompareState {
   setOverlaySource: (index: number) => void;
   setOverlayPeek: (peek: boolean) => void;
   setEqualHeight: (value: boolean) => void;
+  setRatioEnabled: (enabled: boolean) => void;
+  setRatioSwapped: (swapped: boolean) => void;
+  toggleRatio: () => void;
   setViewport: (viewport: Viewport, source?: "manual" | "fit") => void;
   requestFit: () => void;
   requestActualSize: () => void;
@@ -119,6 +135,10 @@ interface CompareState {
 
 function itemId(npzPath: string, key: string): string {
   return `${npzPath}::${key}`;
+}
+
+function keepRatio(sourceCount: number, enabled: boolean): boolean {
+  return enabled && canEnableRatio(sourceCount);
 }
 
 /** Changing which tiles are on screen invalidates both the A/B cursor and the overlay pairing. */
@@ -139,6 +159,8 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   overlaySource: 1,
   overlayPeek: false,
   equalHeight: false,
+  ratioEnabled: false,
+  ratioSwapped: false,
   panel: "hidden",
   splitComparePercent: 45,
   viewport: IDENTITY_VIEWPORT,
@@ -152,6 +174,8 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
     set((state) => ({
       mode,
       ...RESET_TILE_VIEWS,
+      ratioEnabled: false,
+      ratioSwapped: false,
       sequence: clearedSequence(state.sequence.fps),
     })),
 
@@ -163,17 +187,22 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
     set({
       items: [...items, { ...item, id, options: { ...DEFAULT_VIEW_OPTIONS, ...item.options } }],
       panel: get().panel === "hidden" ? "split" : get().panel,
+      ratioEnabled: keepRatio(items.length + 1, get().ratioEnabled),
     });
     return true;
   },
 
   removeItem: (id) =>
-    set((state) => ({
-      items: state.items.filter((item) => item.id !== id),
-      ...RESET_TILE_VIEWS,
-    })),
+    set((state) => {
+      const items = state.items.filter((item) => item.id !== id);
+      return {
+        items,
+        ...RESET_TILE_VIEWS,
+        ratioEnabled: keepRatio(items.length, state.ratioEnabled),
+      };
+    }),
 
-  clearItems: () => set({ items: [], ...RESET_TILE_VIEWS }),
+  clearItems: () => set({ items: [], ...RESET_TILE_VIEWS, ratioEnabled: false }),
 
   toggleInsideKey: (key) =>
     set((state) => {
@@ -185,6 +214,7 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
       return {
         insideKeys,
         ...RESET_TILE_VIEWS,
+        ratioEnabled: keepRatio(insideKeys.length, state.ratioEnabled),
         panel: state.panel === "hidden" ? "split" : state.panel,
         sequence: insideKeys.length === 0 ? clearedSequence(state.sequence.fps) : state.sequence,
       };
@@ -194,6 +224,7 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
     set((state) => ({
       insideKeys: keys.slice(0, MAX_COMPARE_ITEMS),
       ...RESET_TILE_VIEWS,
+      ratioEnabled: keepRatio(Math.min(keys.length, MAX_COMPARE_ITEMS), state.ratioEnabled),
       sequence: keys.length === 0 ? clearedSequence(state.sequence.fps) : state.sequence,
     })),
   setLayout: (layout) => set({ layout }),
@@ -222,6 +253,14 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   setOverlaySource: (index) => set({ overlaySource: Math.max(1, index) }),
   setOverlayPeek: (peek) => set({ overlayPeek: peek }),
   setEqualHeight: (value) => set({ equalHeight: value }),
+  setRatioEnabled: (enabled) => set({ ratioEnabled: enabled }),
+  setRatioSwapped: (swapped) => set({ ratioSwapped: swapped }),
+  toggleRatio: () =>
+    set((state) => {
+      const source = state.mode === "cross" ? state.items.length : state.insideKeys.length;
+      if (!canEnableRatio(source)) return { ratioEnabled: false };
+      return { ratioEnabled: !state.ratioEnabled };
+    }),
 
   // Panning must not reset when flipping between A and B, so the viewport is group-level state.
   // Anything but an explicit fit counts as manual, which stops the panel from re-fitting

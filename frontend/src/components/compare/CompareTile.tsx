@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import clsx from "clsx";
 import { FileQuestion, Layers, X } from "lucide-react";
-import { renderUrl } from "../../lib/api";
+import { renderUrl, ratioRenderUrl } from "../../lib/api";
 import { useImageResource } from "../../hooks/useImageResource";
 import { usePanZoom } from "../../hooks/usePanZoom";
 import { useAppStore } from "../../store/useAppStore";
@@ -19,6 +19,8 @@ export interface TileSpec {
   options: ViewOptions;
   missing: boolean;
   removable: boolean;
+  /** Present on the temporary 2÷1 gainmap tile. */
+  derived?: { num: TileSpec; den: TileSpec };
 }
 
 export interface OverlayLayer {
@@ -69,16 +71,34 @@ export function CompareTile({
   const setViewport = useCompareStore((state) => state.setViewport);
   const panZoom = usePanZoom(viewport, setViewport);
 
-  const urlFor = (target: TileSpec) =>
-    target.missing
-      ? null
-      : renderUrl({
-          path: target.npzPath,
-          key: target.key,
-          gamut,
-          version: target.version,
-          options: target.options,
-        });
+  const urlFor = (target: TileSpec) => {
+    if (target.missing) return null;
+    if (target.derived) {
+      return ratioRenderUrl({
+        num: {
+          path: target.derived.num.npzPath,
+          key: target.derived.num.key,
+          version: target.derived.num.version,
+          options: target.derived.num.options,
+        },
+        den: {
+          path: target.derived.den.npzPath,
+          key: target.derived.den.key,
+          version: target.derived.den.version,
+          options: target.derived.den.options,
+        },
+        gamut,
+        version: target.version,
+      });
+    }
+    return renderUrl({
+      path: target.npzPath,
+      key: target.key,
+      gamut,
+      version: target.version,
+      options: target.options,
+    });
+  };
 
   const url = urlFor(spec);
   const { src, state, error } = useImageResource(url);
@@ -99,6 +119,7 @@ export function CompareTile({
       <div
         data-testid="compare-tile"
         data-key={spec.key}
+        data-derived={spec.derived ? "true" : undefined}
         data-missing="true"
         className="relative flex min-h-0 min-w-0 flex-col items-center justify-center gap-2 border border-dashed border-zinc-700 bg-zinc-900/40"
       >
@@ -127,6 +148,7 @@ export function CompareTile({
       ref={panZoom.containerRef}
       data-testid="compare-tile"
       data-key={spec.key}
+      data-derived={spec.derived ? "true" : undefined}
       data-overlay={overlay ? (overlay.hidden ? "hidden" : "on") : undefined}
       className="checkerboard relative min-h-0 min-w-0 cursor-grab overflow-hidden border border-zinc-800 active:cursor-grabbing"
       onPointerDown={panZoom.onPointerDown}

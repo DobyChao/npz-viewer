@@ -22,7 +22,7 @@ from ..models import (
     SortOrder,
 )
 from ..paths import to_posix
-from ..services import npzio, render
+from ..services import npzio, ratio, render
 from ..services.dirindex import dir_index, filter_entries, paginate
 from .deps import image_response, resolve_dir, resolve_file
 
@@ -172,3 +172,72 @@ async def npz_pixel(
 ) -> PixelValue:
     target = resolve_file(path)
     return await asyncio.to_thread(render.pixel_value, target, key, x, y, batch)
+
+
+def _operand(
+    key: str, batch: int, layout: Layout | None, channel: int
+) -> ratio.OperandParams:
+    return ratio.OperandParams(key=key, batch=batch, layout=layout or "auto", channel=channel)
+
+
+@router.get("/ratio/render")
+async def ratio_render(
+    request: Request,
+    path_a: str = Query(..., description="分子（numerator）所在 npz"),
+    key_a: str = Query(...),
+    path_b: str | None = Query(None, description="分母所在 npz；缺省与 path_a 相同"),
+    key_b: str = Query(...),
+    gamut: Gamut = "bt2020",
+    batch_a: int = Query(0, ge=0),
+    batch_b: int = Query(0, ge=0),
+    layout_a: Layout | None = Query(None),
+    layout_b: Layout | None = Query(None),
+    channel_a: int = Query(0, ge=0),
+    channel_b: int = Query(0, ge=0),
+    colormap: Colormap = "none",
+    gainmap_gamut: bool = False,
+    max_size: int = Query(0, ge=0, le=16384),
+    fmt: ImageFormat = Query("png", alias="format"),
+    v: str = Query("", description="缓存击穿用的版本串，服务端忽略"),
+) -> Response:
+    path_num = resolve_file(path_a)
+    path_den = resolve_file(path_b) if path_b else path_num
+    params = ratio.RatioParams(
+        num=_operand(key_a, batch_a, layout_a, channel_a),
+        den=_operand(key_b, batch_b, layout_b, channel_b),
+        gamut=gamut,
+        colormap=colormap,
+        gainmap_gamut=gainmap_gamut,
+        max_size=max_size,
+        fmt=fmt,
+    )
+    data, mime, etag = await asyncio.to_thread(ratio.render_ratio, path_num, path_den, params)
+    return image_response(request, data, mime, etag)
+
+
+@router.get("/ratio/pixel", response_model=PixelValue)
+async def ratio_pixel_endpoint(
+    path_a: str = Query(...),
+    key_a: str = Query(...),
+    path_b: str | None = Query(None),
+    key_b: str = Query(...),
+    x: int = Query(..., ge=0),
+    y: int = Query(..., ge=0),
+    batch_a: int = Query(0, ge=0),
+    batch_b: int = Query(0, ge=0),
+    layout_a: Layout | None = Query(None),
+    layout_b: Layout | None = Query(None),
+    channel_a: int = Query(0, ge=0),
+    channel_b: int = Query(0, ge=0),
+) -> PixelValue:
+    path_num = resolve_file(path_a)
+    path_den = resolve_file(path_b) if path_b else path_num
+    return await asyncio.to_thread(
+        ratio.ratio_pixel,
+        path_num,
+        _operand(key_a, batch_a, layout_a, channel_a),
+        path_den,
+        _operand(key_b, batch_b, layout_b, channel_b),
+        x,
+        y,
+    )
