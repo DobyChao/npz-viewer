@@ -191,10 +191,14 @@ export function ComparePanel() {
       : displayTiles;
   const effectiveLayout = resolveLayout(layout, visibleTiles.length);
 
-  // Overlay is available whenever two source tiles sit side by side. Hold X to overlay
+  // Overlay is available whenever two tiles sit side by side. Hold X to overlay
   // (default); click the button to lock it on, then hold X to peek underneath.
+  // The layer is always painted on tile 1; the source can be any later tile, including the op tile.
   const overlayAvailable = tiles.length >= 2 && toggleIndex === null && panel !== "hidden";
-  const overlaySourceIndex = overlayAvailable ? Math.min(overlaySource, tiles.length - 1) : null;
+  const overlaySourceIndex = overlayAvailable
+    ? Math.min(Math.max(1, overlaySource), displayTiles.length - 1)
+    : null;
+  const overlaySpec = overlaySourceIndex !== null ? displayTiles[overlaySourceIndex] : undefined;
   const overlayVisible = overlayAvailable && overlayEnabled !== overlayPeek;
 
   // The first visible tile is the baseline: fitting, 1:1 and equal-height all key off it.
@@ -564,12 +568,12 @@ export function ComparePanel() {
               viewport={viewport}
               scaleFactor={heightFactor(tile.id)}
               overlay={
-                overlaySourceIndex !== null && index === 0
+                overlaySpec && overlaySourceIndex !== null && index === 0
                   ? {
-                      spec: tiles[overlaySourceIndex],
+                      spec: overlaySpec,
                       index: overlaySourceIndex,
                       hidden: !overlayVisible,
-                      scaleFactor: heightFactor(tiles[overlaySourceIndex].id),
+                      scaleFactor: heightFactor(overlaySpec.id),
                     }
                   : undefined
               }
@@ -579,11 +583,7 @@ export function ComparePanel() {
                 (overlayEnabled || overlayVisible)
               }
               onPickOverlaySource={
-                overlaySourceIndex !== null &&
-                !tile.derived &&
-                index > 0 &&
-                index < tiles.length &&
-                index !== overlaySourceIndex
+                overlaySourceIndex !== null && index > 0 && index !== overlaySourceIndex
                   ? () => setOverlaySource(index)
                   : undefined
               }

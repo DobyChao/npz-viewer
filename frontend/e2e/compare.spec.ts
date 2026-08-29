@@ -393,7 +393,11 @@ test("op tile is tile 2 ÷ tile 1, can swap operands, and can switch to multiply
 
   await page.getByTestId("overlay-toggle").click();
   await expect(page.getByTestId("overlay-status")).toContainText("覆盖 2 → 1");
-  await expect(page.getByTestId("pick-overlay-source")).toHaveCount(0);
+  await expect(derived.getByTestId("pick-overlay-source")).toBeVisible();
+  await derived.getByTestId("pick-overlay-source").click();
+  await expect(page.getByTestId("overlay-status")).toContainText("覆盖 3 → 1");
+  await expect(page.getByTestId("compare-tile").first().getByTestId("compare-overlay")).toBeVisible();
+  await expect(page.getByTestId("compare-tile").nth(1).getByTestId("pick-overlay-source")).toBeVisible();
 
   await derived.getByTestId("remove-tile").click();
   await expect(page.getByTestId("compare-tile")).toHaveCount(2);

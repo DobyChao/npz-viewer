@@ -77,7 +77,7 @@ interface CompareState {
    * referentially stable.
    */
   overlayEnabled: boolean;
-  /** Tile index whose image is painted over tile 1; never 0. */
+  /** Display-tile index painted over tile 1; never 0. May be the derived op tile. */
   overlaySource: number;
   /**
    * True while X is held. XOR'd with overlayEnabled: hold X to overlay
