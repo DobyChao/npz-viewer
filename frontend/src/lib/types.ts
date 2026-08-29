@@ -119,10 +119,11 @@ export interface SiblingResult {
 }
 
 export interface VideoExportKey {
-  type?: "key" | "ratio";
+  type?: "key" | "op";
+  op?: string;
   key: string;
-  key_num?: string;
-  key_den?: string;
+  key_a?: string;
+  key_b?: string;
   batch: number;
   layout?: string;
   channel: number;

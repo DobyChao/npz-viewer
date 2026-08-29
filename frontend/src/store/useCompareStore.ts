@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { DEFAULT_VIEW_OPTIONS } from "../lib/types";
+import { DEFAULT_OP_ID } from "../lib/ops";
 import type {
   CompareLayout,
   CompareMode,
@@ -10,8 +11,13 @@ import type {
 export const MAX_COMPARE_ITEMS = 4;
 
 /** Extra derived tile is allowed only when 2 or 3 source tiles are showing. */
-export function canEnableRatio(sourceCount: number): boolean {
+export function canEnableOp(sourceCount: number): boolean {
   return sourceCount >= 2 && sourceCount < MAX_COMPARE_ITEMS;
+}
+
+export function clampOperand(index: number, sourceCount: number): number {
+  if (sourceCount <= 0) return 0;
+  return Math.min(Math.max(0, index), sourceCount - 1);
 }
 
 export interface CompareItem {
@@ -85,13 +91,17 @@ interface CompareState {
    */
   equalHeight: boolean;
   /**
-   * Temporary 2÷1 gainmap tile appended after the source tiles. Session-only;
+   * Temporary binary-op tile appended after the source tiles. Session-only;
    * not written back to the npz. Survives key changes so sequence playback
    * can keep recomputing the same pairing.
    */
-  ratioEnabled: boolean;
-  /** When true, invert to 1÷2. Default false = tile 2 / tile 1. */
-  ratioSwapped: boolean;
+  opEnabled: boolean;
+  /** Operator id from BINARY_OPS; default div = tile 2 ÷ tile 1. */
+  opId: string;
+  /** 0-based source-tile index of the left operand. Default 1 (tile 2). */
+  opLeft: number;
+  /** 0-based source-tile index of the right operand. Default 0 (tile 1). */
+  opRight: number;
   panel: ComparePanelState;
   /** Last split height of the compare pane, as a percentage of the right column. */
   splitComparePercent: number;
@@ -120,9 +130,12 @@ interface CompareState {
   setOverlaySource: (index: number) => void;
   setOverlayPeek: (peek: boolean) => void;
   setEqualHeight: (value: boolean) => void;
-  setRatioEnabled: (enabled: boolean) => void;
-  setRatioSwapped: (swapped: boolean) => void;
-  toggleRatio: () => void;
+  setOpEnabled: (enabled: boolean) => void;
+  setOpId: (opId: string) => void;
+  setOpLeft: (index: number) => void;
+  setOpRight: (index: number) => void;
+  swapOpOperands: () => void;
+  toggleOp: () => void;
   setViewport: (viewport: Viewport, source?: "manual" | "fit") => void;
   requestFit: () => void;
   requestActualSize: () => void;
@@ -137,8 +150,18 @@ function itemId(npzPath: string, key: string): string {
   return `${npzPath}::${key}`;
 }
 
-function keepRatio(sourceCount: number, enabled: boolean): boolean {
-  return enabled && canEnableRatio(sourceCount);
+function keepOp(sourceCount: number, enabled: boolean): boolean {
+  return enabled && canEnableOp(sourceCount);
+}
+
+function clampPair(left: number, right: number, sourceCount: number) {
+  // Keep the 2÷1 defaults while only one source tile exists; clamping here
+  // would smash opLeft 1→0 and the pair would stay 1÷1 after the second tile.
+  if (sourceCount < 2) return { opLeft: left, opRight: right };
+  return {
+    opLeft: clampOperand(left, sourceCount),
+    opRight: clampOperand(right, sourceCount),
+  };
 }
 
 /** Changing which tiles are on screen invalidates both the A/B cursor and the overlay pairing. */
@@ -159,8 +182,10 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   overlaySource: 1,
   overlayPeek: false,
   equalHeight: false,
-  ratioEnabled: false,
-  ratioSwapped: false,
+  opEnabled: false,
+  opId: DEFAULT_OP_ID,
+  opLeft: 1,
+  opRight: 0,
   panel: "hidden",
   splitComparePercent: 45,
   viewport: IDENTITY_VIEWPORT,
@@ -174,8 +199,10 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
     set((state) => ({
       mode,
       ...RESET_TILE_VIEWS,
-      ratioEnabled: false,
-      ratioSwapped: false,
+      opEnabled: false,
+      opId: DEFAULT_OP_ID,
+      opLeft: 1,
+      opRight: 0,
       sequence: clearedSequence(state.sequence.fps),
     })),
 
@@ -187,7 +214,8 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
     set({
       items: [...items, { ...item, id, options: { ...DEFAULT_VIEW_OPTIONS, ...item.options } }],
       panel: get().panel === "hidden" ? "split" : get().panel,
-      ratioEnabled: keepRatio(items.length + 1, get().ratioEnabled),
+      opEnabled: keepOp(items.length + 1, get().opEnabled),
+      ...clampPair(get().opLeft, get().opRight, items.length + 1),
     });
     return true;
   },
@@ -198,11 +226,13 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
       return {
         items,
         ...RESET_TILE_VIEWS,
-        ratioEnabled: keepRatio(items.length, state.ratioEnabled),
+        opEnabled: keepOp(items.length, state.opEnabled),
+        ...clampPair(state.opLeft, state.opRight, items.length),
       };
     }),
 
-  clearItems: () => set({ items: [], ...RESET_TILE_VIEWS, ratioEnabled: false }),
+  clearItems: () =>
+    set({ items: [], ...RESET_TILE_VIEWS, opEnabled: false, opLeft: 1, opRight: 0 }),
 
   toggleInsideKey: (key) =>
     set((state) => {
@@ -214,7 +244,8 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
       return {
         insideKeys,
         ...RESET_TILE_VIEWS,
-        ratioEnabled: keepRatio(insideKeys.length, state.ratioEnabled),
+        opEnabled: keepOp(insideKeys.length, state.opEnabled),
+        ...clampPair(state.opLeft, state.opRight, insideKeys.length),
         panel: state.panel === "hidden" ? "split" : state.panel,
         sequence: insideKeys.length === 0 ? clearedSequence(state.sequence.fps) : state.sequence,
       };
@@ -224,7 +255,8 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
     set((state) => ({
       insideKeys: keys.slice(0, MAX_COMPARE_ITEMS),
       ...RESET_TILE_VIEWS,
-      ratioEnabled: keepRatio(Math.min(keys.length, MAX_COMPARE_ITEMS), state.ratioEnabled),
+      opEnabled: keepOp(Math.min(keys.length, MAX_COMPARE_ITEMS), state.opEnabled),
+      ...clampPair(state.opLeft, state.opRight, Math.min(keys.length, MAX_COMPARE_ITEMS)),
       sequence: keys.length === 0 ? clearedSequence(state.sequence.fps) : state.sequence,
     })),
   setLayout: (layout) => set({ layout }),
@@ -253,13 +285,25 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   setOverlaySource: (index) => set({ overlaySource: Math.max(1, index) }),
   setOverlayPeek: (peek) => set({ overlayPeek: peek }),
   setEqualHeight: (value) => set({ equalHeight: value }),
-  setRatioEnabled: (enabled) => set({ ratioEnabled: enabled }),
-  setRatioSwapped: (swapped) => set({ ratioSwapped: swapped }),
-  toggleRatio: () =>
+  setOpEnabled: (enabled) => set({ opEnabled: enabled }),
+  setOpId: (opId) => set({ opId }),
+  setOpLeft: (index) =>
     set((state) => {
       const source = state.mode === "cross" ? state.items.length : state.insideKeys.length;
-      if (!canEnableRatio(source)) return { ratioEnabled: false };
-      return { ratioEnabled: !state.ratioEnabled };
+      return { opLeft: clampOperand(index, source) };
+    }),
+  setOpRight: (index) =>
+    set((state) => {
+      const source = state.mode === "cross" ? state.items.length : state.insideKeys.length;
+      return { opRight: clampOperand(index, source) };
+    }),
+  swapOpOperands: () =>
+    set((state) => ({ opLeft: state.opRight, opRight: state.opLeft })),
+  toggleOp: () =>
+    set((state) => {
+      const source = state.mode === "cross" ? state.items.length : state.insideKeys.length;
+      if (!canEnableOp(source)) return { opEnabled: false };
+      return { opEnabled: !state.opEnabled };
     }),
 
   // Panning must not reset when flipping between A and B, so the viewport is group-level state.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import astuple, dataclass
 from pathlib import Path
 
@@ -22,8 +23,63 @@ from .render import (
 )
 
 DIVIDE_EPS = np.float32(1e-6)
-# Bump when divide/align semantics change so disk render cache does not serve old PNGs.
-RATIO_CACHE_VERSION = 2
+# Bump when apply/align/encode semantics change so disk render cache drops old PNGs.
+OP_CACHE_VERSION = 1
+
+ApplyFn = Callable[
+    [npt.NDArray[np.float32], npt.NDArray[np.float32]], npt.NDArray[np.float32]
+]
+
+
+@dataclass(frozen=True, slots=True)
+class Operator:
+    id: str
+    symbol: str
+    label: str
+    display: str  # "gainmap" | "linear"
+    apply: ApplyFn
+
+    def public(self) -> dict[str, str]:
+        return {
+            "id": self.id,
+            "symbol": self.symbol,
+            "label": self.label,
+            "display": self.display,
+        }
+
+
+def _divide(
+    left: npt.NDArray[np.float32], right: npt.NDArray[np.float32]
+) -> npt.NDArray[np.float32]:
+    # Keep signed den: max(den, eps) maps negatives to +eps and yellow-clips RGB.
+    tiny_left = np.abs(left) < DIVIDE_EPS
+    tiny_right = np.abs(right) < DIVIDE_EPS
+    safe_right = np.where(tiny_right, np.copysign(DIVIDE_EPS, right), right)
+    ratio = left / safe_right
+    ratio = np.where(tiny_left & tiny_right, np.float32(1.0), ratio)
+    return _finite(ratio)
+
+
+def _multiply(
+    left: npt.NDArray[np.float32], right: npt.NDArray[np.float32]
+) -> npt.NDArray[np.float32]:
+    return _finite(left * right)
+
+
+# Adding an operator: apply(left, right) on aligned HWC float32, then register here.
+# Frontend lib/ops.ts BINARY_OPS ids must match.
+OPERATORS: dict[str, Operator] = {
+    "div": Operator("div", "÷", "除法", "gainmap", _divide),
+    "mul": Operator("mul", "×", "乘法", "linear", _multiply),
+}
+
+
+def get_operator(op_id: str) -> Operator:
+    operator = OPERATORS.get(op_id)
+    if operator is None:
+        known = "、".join(OPERATORS)
+        raise BadParam(f"不支持的算子: {op_id}，可选 {known}")
+    return operator
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,9 +91,10 @@ class OperandParams:
 
 
 @dataclass(frozen=True, slots=True)
-class RatioParams:
-    num: OperandParams
-    den: OperandParams
+class OpParams:
+    op: str
+    left: OperandParams
+    right: OperandParams
     gamut: str = "bt2020"
     colormap: str = "none"
     gainmap_gamut: bool = False
@@ -68,7 +125,7 @@ def operand_plane(array: npt.NDArray, meta: KeyMeta, params: OperandParams) -> n
 def load_operand(path: Path, params: OperandParams) -> npt.NDArray[np.float32]:
     meta = npzio.find_key(path, params.key)
     if not meta.renderable:
-        raise UnsupportedKind(f"key「{params.key}」的 kind 为 {meta.kind}，无法参与比值")
+        raise UnsupportedKind(f"key「{params.key}」的 kind 为 {meta.kind}，无法参与算子")
     array = npzio.load_array(path, params.key)
     return operand_plane(array, meta, params)
 
@@ -85,61 +142,57 @@ def resize_hwc(plane: npt.NDArray[np.float32], height: int, width: int) -> npt.N
 
 
 def align_spatial(
-    num: npt.NDArray[np.float32], den: npt.NDArray[np.float32]
+    left: npt.NDArray[np.float32], right: npt.NDArray[np.float32]
 ) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
     """Bilinear-upsample the smaller plane (by pixel count) onto the larger."""
-    n_h, n_w = num.shape[:2]
-    d_h, d_w = den.shape[:2]
-    if (n_h, n_w) == (d_h, d_w):
-        return num, den
-    if n_h * n_w >= d_h * d_w:
-        return num, resize_hwc(den, n_h, n_w)
-    return resize_hwc(num, d_h, d_w), den
+    l_h, l_w = left.shape[:2]
+    r_h, r_w = right.shape[:2]
+    if (l_h, l_w) == (r_h, r_w):
+        return left, right
+    if l_h * l_w >= r_h * r_w:
+        return left, resize_hwc(right, l_h, l_w)
+    return resize_hwc(left, r_h, r_w), right
 
 
 def match_channels(
-    num: npt.NDArray[np.float32], den: npt.NDArray[np.float32]
+    left: npt.NDArray[np.float32], right: npt.NDArray[np.float32]
 ) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
-    n_c, d_c = num.shape[-1], den.shape[-1]
-    if n_c == d_c:
-        return num, den
-    if n_c == 1 and d_c == 3:
-        return np.repeat(num, 3, axis=-1), den
-    if n_c == 3 and d_c == 1:
-        return num, np.repeat(den, 3, axis=-1)
-    raise BadParam(f"无法对齐通道数: {n_c} 与 {d_c}")
+    l_c, r_c = left.shape[-1], right.shape[-1]
+    if l_c == r_c:
+        return left, right
+    if l_c == 1 and r_c == 3:
+        return np.repeat(left, 3, axis=-1), right
+    if l_c == 3 and r_c == 1:
+        return left, np.repeat(right, 3, axis=-1)
+    raise BadParam(f"无法对齐通道数: {l_c} 与 {r_c}")
 
 
-def divide_gainmap(
-    num: npt.NDArray[np.float32], den: npt.NDArray[np.float32]
+def apply_operator(
+    op_id: str, left: npt.NDArray[np.float32], right: npt.NDArray[np.float32]
 ) -> npt.NDArray[np.float32]:
-    aligned_num, aligned_den = match_channels(*align_spatial(num, den))
-    # Keep signed den: max(den, eps) maps negatives to +eps and yellow-clips RGB.
-    tiny_num = np.abs(aligned_num) < DIVIDE_EPS
-    tiny_den = np.abs(aligned_den) < DIVIDE_EPS
-    safe_den = np.where(tiny_den, np.copysign(DIVIDE_EPS, aligned_den), aligned_den)
-    ratio = aligned_num / safe_den
-    ratio = np.where(tiny_num & tiny_den, np.float32(1.0), ratio)
-    return _finite(ratio)
+    operator = get_operator(op_id)
+    aligned_left, aligned_right = match_channels(*align_spatial(left, right))
+    return operator.apply(aligned_left, aligned_right)
 
 
-def ratio_array(
-    path_num: Path, num: OperandParams, path_den: Path, den: OperandParams
+def op_array(
+    path_left: Path, left: OperandParams, path_right: Path, right: OperandParams, op_id: str
 ) -> npt.NDArray[np.float32]:
-    return divide_gainmap(load_operand(path_num, num), load_operand(path_den, den))
+    return apply_operator(op_id, load_operand(path_left, left), load_operand(path_right, right))
 
 
-def ratio_pixels(values: npt.NDArray[np.float32], params: RatioParams) -> npt.NDArray[np.uint8]:
+def op_pixels(values: npt.NDArray[np.float32], params: OpParams) -> npt.NDArray[np.uint8]:
+    is_gainmap = get_operator(params.op).display == "gainmap"
     if values.shape[-1] == 1:
         return render_gray_plane(
             values[..., 0],
-            is_gainmap=True,
+            is_gainmap=is_gainmap,
             normalize=False,
             colormap=params.colormap,
         )
     return render_color_plane(
         values,
-        is_gainmap=True,
+        is_gainmap=is_gainmap,
         gamut=params.gamut,
         gainmap_gamut=params.gainmap_gamut,
         alpha_mode="rgb",
@@ -147,28 +200,28 @@ def ratio_pixels(values: npt.NDArray[np.float32], params: RatioParams) -> npt.ND
 
 
 def _cache_digest(
-    path_num: Path,
-    stamp_num: npzio.FileStamp,
-    path_den: Path,
-    stamp_den: npzio.FileStamp,
-    params: RatioParams,
+    path_left: Path,
+    stamp_left: npzio.FileStamp,
+    path_right: Path,
+    stamp_right: npzio.FileStamp,
+    params: OpParams,
 ) -> str:
     return imgcache.digest_for(
         (
-            os.path.normcase(str(path_num)),
-            stamp_num.mtime,
-            stamp_num.size,
-            os.path.normcase(str(path_den)),
-            stamp_den.mtime,
-            stamp_den.size,
+            os.path.normcase(str(path_left)),
+            stamp_left.mtime,
+            stamp_left.size,
+            os.path.normcase(str(path_right)),
+            stamp_right.mtime,
+            stamp_right.size,
             astuple(params),
-            RATIO_CACHE_VERSION,
+            OP_CACHE_VERSION,
         )
     )
 
 
-def render_ratio(
-    path_num: Path, path_den: Path, params: RatioParams
+def render_op(
+    path_left: Path, path_right: Path, params: OpParams
 ) -> tuple[bytes, str, str]:
     if params.fmt not in MIME_BY_FORMAT:
         raise BadParam(f"不支持的图片格式: {params.fmt}")
@@ -176,18 +229,19 @@ def render_ratio(
         raise BadParam(f"不支持的 colormap: {params.colormap}")
     if params.gamut not in ("bt2020", "p3"):
         raise BadParam(f"不支持的色域: {params.gamut}")
+    get_operator(params.op)
 
-    stamp_num = npzio.stamp(path_num)
-    stamp_den = npzio.stamp(path_den)
-    digest = _cache_digest(path_num, stamp_num, path_den, stamp_den, params)
+    stamp_left = npzio.stamp(path_left)
+    stamp_right = npzio.stamp(path_right)
+    digest = _cache_digest(path_left, stamp_left, path_right, stamp_right, params)
     etag = f'"{digest}"'
     cached = imgcache.render_cache.get(digest, params.fmt)
     if cached is not None:
         return cached, MIME_BY_FORMAT[params.fmt], etag
 
-    values = ratio_array(path_num, params.num, path_den, params.den)
+    values = op_array(path_left, params.left, path_right, params.right, params.op)
     encode_params = RenderParams(
-        key=params.num.key,
+        key=params.left.key,
         gamut=params.gamut,
         colormap=params.colormap,
         gainmap_gamut=params.gainmap_gamut,
@@ -195,20 +249,21 @@ def render_ratio(
         fmt=params.fmt,
         quality=params.quality,
     )
-    data = encode_image(ratio_pixels(values, params), encode_params)
+    data = encode_image(op_pixels(values, params), encode_params)
     imgcache.render_cache.put(digest, params.fmt, data)
     return data, MIME_BY_FORMAT[params.fmt], etag
 
 
-def ratio_pixel(
-    path_num: Path,
-    num: OperandParams,
-    path_den: Path,
-    den: OperandParams,
+def op_pixel(
+    path_left: Path,
+    left: OperandParams,
+    path_right: Path,
+    right: OperandParams,
+    op_id: str,
     x: int,
     y: int,
 ) -> PixelValue:
-    values = ratio_array(path_num, num, path_den, den)
+    values = op_array(path_left, left, path_right, right, op_id)
     height, width = values.shape[0], values.shape[1]
     if not (0 <= x < width and 0 <= y < height):
         raise BadParam(f"像素坐标越界: ({x}, {y})，图像尺寸 {width}x{height}")

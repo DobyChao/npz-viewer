@@ -171,7 +171,7 @@ def test_export_includes_a_ratio_cell(client: TestClient, frame: Path) -> None:
             "keys": [
                 {"key": "rgb_hwc"},
                 {"key": "gainmap"},
-                {"type": "ratio", "key_num": "gainmap", "key_den": "rgb_hwc"},
+                {"type": "op", "op": "div", "key_a": "gainmap", "key_b": "rgb_hwc"},
             ],
             "start": 0,
             "end": 0,
@@ -185,7 +185,7 @@ def test_export_includes_a_ratio_cell(client: TestClient, frame: Path) -> None:
     assert response.status_code == 200, response.text
     body = _wait_job(client, response.json()["id"])
     assert body["status"] == "done", body
-    assert "gainmapdivrgb_hwc" in (body["filename"] or "")
+    assert "divgainmaprgb_hwc" in (body["filename"] or "")
 
 
 def test_missing_key_still_exports(client: TestClient, frame: Path) -> None:

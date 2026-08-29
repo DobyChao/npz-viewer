@@ -18,7 +18,7 @@ from ..config import get_roots_store, get_settings
 from ..errors import AppError, BadParam, KeyNotFound, UnsupportedKind
 from ..models import ExportKey, VideoExportRequest, VideoJobInfo
 from ..paths import resolve_within, to_posix
-from . import nav, npzio, ratio, render
+from . import nav, npzio, ops, render
 from .render import RenderParams
 
 logger = logging.getLogger("npz_view.video")
@@ -220,16 +220,17 @@ def render_key_image(path: Path, spec: ExportKey, gamut: str) -> Image.Image | N
         return None
 
 
-def render_ratio_image(path: Path, spec: ExportKey, gamut: str) -> Image.Image | None:
-    params = ratio.RatioParams(
-        num=ratio.OperandParams(
-            key=spec.key_num or "",
+def render_op_image(path: Path, spec: ExportKey, gamut: str) -> Image.Image | None:
+    params = ops.OpParams(
+        op=spec.op or "div",
+        left=ops.OperandParams(
+            key=spec.key_a or "",
             batch=spec.batch,
             layout=spec.layout,
             channel=spec.channel,
         ),
-        den=ratio.OperandParams(
-            key=spec.key_den or "",
+        right=ops.OperandParams(
+            key=spec.key_b or "",
             batch=spec.batch,
             layout=spec.layout,
             channel=spec.channel,
@@ -239,27 +240,29 @@ def render_ratio_image(path: Path, spec: ExportKey, gamut: str) -> Image.Image |
         gainmap_gamut=spec.gainmap_gamut,
     )
     try:
-        values = ratio.ratio_array(path, params.num, path, params.den)
-        return to_rgb_image(ratio.ratio_pixels(values, params))
+        values = ops.op_array(path, params.left, path, params.right, params.op)
+        return to_rgb_image(ops.op_pixels(values, params))
     except (KeyNotFound, UnsupportedKind, BadParam):
         return None
 
 
 def render_cell_image(path: Path, spec: ExportKey, gamut: str) -> Image.Image | None:
-    if spec.type == "ratio":
-        return render_ratio_image(path, spec, gamut)
+    if spec.type == "op":
+        return render_op_image(path, spec, gamut)
     return render_key_image(path, spec, gamut)
 
 
 def cell_label(spec: ExportKey) -> str:
-    if spec.type == "ratio":
-        return f"{spec.key_num} ÷ {spec.key_den}"
+    if spec.type == "op":
+        operator = ops.OPERATORS.get(spec.op or "")
+        symbol = operator.symbol if operator else (spec.op or "?")
+        return f"{spec.key_a} {symbol} {spec.key_b}"
     return spec.key
 
 
 def cell_token(spec: ExportKey) -> str:
-    if spec.type == "ratio":
-        return f"{spec.key_num}div{spec.key_den}"
+    if spec.type == "op":
+        return f"{spec.op}{spec.key_a}{spec.key_b}"
     return spec.key
 
 
@@ -495,7 +498,7 @@ def validate_request(request: VideoExportRequest, anchor: Path) -> int:
         raise BadParam("至少选择一个 key")
     if len(request.keys) > MAX_CELLS:
         raise BadParam(f"最多导出 {MAX_CELLS} 格")
-    source_keys = sum(1 for spec in request.keys if spec.type != "ratio")
+    source_keys = sum(1 for spec in request.keys if spec.type == "key")
     if source_keys > MAX_KEYS:
         raise BadParam(f"最多导出 {MAX_KEYS} 个 key")
     if request.start > request.end:

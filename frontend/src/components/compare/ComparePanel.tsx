@@ -13,6 +13,7 @@ import {
   Ratio,
   Repeat,
   Scan,
+  Sigma,
   X,
 } from "lucide-react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -22,9 +23,10 @@ import { isTypingTarget } from "../../hooks/useHotkeys";
 import { useCurrentNpz } from "../../hooks/useCurrentNpz";
 import { useNpzNavigation } from "../../hooks/useNpzNavigation";
 import { useAppStore } from "../../store/useAppStore";
-import { canEnableRatio, useCompareStore } from "../../store/useCompareStore";
+import { canEnableOp, clampOperand, useCompareStore } from "../../store/useCompareStore";
 import type { CompareLayout, VideoExportKey } from "../../lib/types";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
+import { BINARY_OPS, formatOpExpr, formatOpKeys, opById } from "../../lib/ops";
 import { Button, EmptyState, IconButton, SectionHeader, Select } from "../ui";
 import { CompareTile } from "./CompareTile";
 import type { TileSpec } from "./CompareTile";
@@ -81,10 +83,15 @@ export function ComparePanel() {
   const lightbox = useAppStore((state) => state.lightbox);
   const equalHeight = useCompareStore((state) => state.equalHeight);
   const setEqualHeight = useCompareStore((state) => state.setEqualHeight);
-  const ratioEnabled = useCompareStore((state) => state.ratioEnabled);
-  const ratioSwapped = useCompareStore((state) => state.ratioSwapped);
-  const toggleRatio = useCompareStore((state) => state.toggleRatio);
-  const setRatioSwapped = useCompareStore((state) => state.setRatioSwapped);
+  const opEnabled = useCompareStore((state) => state.opEnabled);
+  const opId = useCompareStore((state) => state.opId);
+  const opLeft = useCompareStore((state) => state.opLeft);
+  const opRight = useCompareStore((state) => state.opRight);
+  const toggleOp = useCompareStore((state) => state.toggleOp);
+  const setOpId = useCompareStore((state) => state.setOpId);
+  const setOpLeft = useCompareStore((state) => state.setOpLeft);
+  const setOpRight = useCompareStore((state) => state.setOpRight);
+  const swapOpOperands = useCompareStore((state) => state.swapOpOperands);
   const setOverlayEnabled = useCompareStore((state) => state.setOverlayEnabled);
   const setOverlaySource = useCompareStore((state) => state.setOverlaySource);
   const setOverlayPeek = useCompareStore((state) => state.setOverlayPeek);
@@ -153,26 +160,29 @@ export function ComparePanel() {
     });
   }, [mode, items, insideKeys, path, meta, version, tileMeta, tilePath, tileName, tileVersion]);
 
-  const ratioAllowed = canEnableRatio(tiles.length);
+  const opAllowed = canEnableOp(tiles.length);
+  const leftIndex = clampOperand(opLeft, tiles.length);
+  const rightIndex = clampOperand(opRight, tiles.length);
   const displayTiles = useMemo<TileSpec[]>(() => {
-    if (!ratioEnabled || !ratioAllowed) return tiles;
-    const num = ratioSwapped ? tiles[0] : tiles[1];
-    const den = ratioSwapped ? tiles[1] : tiles[0];
+    if (!opEnabled || !opAllowed) return tiles;
+    const left = tiles[leftIndex];
+    const right = tiles[rightIndex];
+    if (!left || !right) return tiles;
     return [
       ...tiles,
       {
-        id: `ratio::${num.id}::${den.id}`,
-        key: `${num.key} ÷ ${den.key}`,
-        npzPath: num.npzPath,
-        npzName: num.npzPath === den.npzPath ? num.npzName : `${num.npzName} / ${den.npzName}`,
-        version: `${num.version}|${den.version}`,
+        id: `op::${opId}::${left.id}::${right.id}`,
+        key: formatOpKeys(opId, left.key, right.key),
+        npzPath: left.npzPath,
+        npzName: left.npzPath === right.npzPath ? left.npzName : `${left.npzName} / ${right.npzName}`,
+        version: `${left.version}|${right.version}`,
         options: DEFAULT_VIEW_OPTIONS,
-        missing: num.missing || den.missing,
+        missing: left.missing || right.missing,
         removable: true,
-        derived: { num, den },
+        derived: { op: opId, left, right },
       },
     ];
-  }, [tiles, ratioEnabled, ratioAllowed, ratioSwapped]);
+  }, [tiles, opEnabled, opAllowed, opId, leftIndex, rightIndex]);
 
   const signature = displayTiles.map((tile) => tile.id).join("|");
   const visibleTiles =
@@ -324,16 +334,17 @@ export function ComparePanel() {
       if (now - lastPixelFetch.current < PIXEL_THROTTLE_MS) return;
       lastPixelFetch.current = now;
       const request = spec.derived
-        ? api.ratioPixel({
-            num: {
-              path: spec.derived.num.npzPath,
-              key: spec.derived.num.key,
-              options: spec.derived.num.options,
+        ? api.opPixel({
+            op: spec.derived.op,
+            left: {
+              path: spec.derived.left.npzPath,
+              key: spec.derived.left.key,
+              options: spec.derived.left.options,
             },
-            den: {
-              path: spec.derived.den.npzPath,
-              key: spec.derived.den.key,
-              options: spec.derived.den.options,
+            right: {
+              path: spec.derived.right.npzPath,
+              key: spec.derived.right.key,
+              options: spec.derived.right.options,
             },
             x,
             y,
@@ -348,7 +359,7 @@ export function ComparePanel() {
 
   const removeTile = (tile: TileSpec) => {
     if (tile.derived) {
-      toggleRatio();
+      toggleOp();
       return;
     }
     if (mode === "cross") removeItem(tile.id);
@@ -445,30 +456,60 @@ export function ComparePanel() {
           <Button
             title={
               tiles.length >= 4
-                ? "已有 4 张源图，无法再加比值格"
+                ? "已有 4 张源图，无法再加算子格"
                 : tiles.length < 2
-                  ? "至少两张图才能算比值"
-                  : ratioEnabled
-                    ? "关掉临时比值格（G）"
-                    : "用第 2 格 ÷ 第 1 格生成临时 gainmap（G）"
+                  ? "至少两张图才能套算子"
+                  : opEnabled
+                    ? `关掉临时算子格（G）· 当前 ${formatOpExpr(opId, leftIndex, rightIndex)}`
+                    : "对两张源图套算子，临时生成一格（G）"
             }
-            data-testid="ratio-toggle"
-            data-swapped={ratioSwapped ? "true" : "false"}
-            active={ratioEnabled && ratioAllowed}
-            disabled={!ratioAllowed}
-            onClick={() => toggleRatio()}
+            data-testid="op-toggle"
+            active={opEnabled && opAllowed}
+            disabled={!opAllowed}
+            onClick={() => toggleOp()}
           >
-            ÷ 比值
+            <Sigma size={13} /> 算子
           </Button>
-          {ratioEnabled && ratioAllowed && (
-            <IconButton
-              title="互换分子分母"
-              data-testid="ratio-swap"
-              active={ratioSwapped}
-              onClick={() => setRatioSwapped(!ratioSwapped)}
-            >
-              <ArrowLeftRight size={13} />
-            </IconButton>
+          {opEnabled && opAllowed && (
+            <>
+              <Select
+                title="算子"
+                data-testid="op-kind"
+                value={opId}
+                options={BINARY_OPS.map((item) => ({
+                  value: item.id,
+                  label: `${item.symbol} ${item.label}`,
+                }))}
+                onChange={setOpId}
+              />
+              <Select
+                title="左操作数"
+                data-testid="op-left"
+                value={String(leftIndex)}
+                options={tiles.map((tile, index) => ({
+                  value: String(index),
+                  label: `${index + 1} ${tile.key}`,
+                }))}
+                onChange={(value) => setOpLeft(Number(value))}
+              />
+              <Select
+                title="右操作数"
+                data-testid="op-right"
+                value={String(rightIndex)}
+                options={tiles.map((tile, index) => ({
+                  value: String(index),
+                  label: `${index + 1} ${tile.key}`,
+                }))}
+                onChange={(value) => setOpRight(Number(value))}
+              />
+              <IconButton
+                title="互换左右操作数"
+                data-testid="op-swap"
+                onClick={() => swapOpOperands()}
+              >
+                <ArrowLeftRight size={13} />
+              </IconButton>
+            </>
           )}
 
           <Button
@@ -569,21 +610,23 @@ export function ComparePanel() {
           naturalSizes={displayTiles.map(
             (tile) => naturalSizes[tile.id] ?? { width: 0, height: 0 },
           )}
-          ratio={
-            ratioEnabled && ratioAllowed && tiles.length >= 2
+          op={
+            opEnabled && opAllowed && tiles.length >= 2
               ? {
-                  num: ratioSwapped ? tiles[0].key : tiles[1].key,
-                  den: ratioSwapped ? tiles[1].key : tiles[0].key,
+                  id: opId,
+                  left: tiles[leftIndex]?.key ?? "",
+                  right: tiles[rightIndex]?.key ?? "",
                 }
               : null
           }
           exportCells={displayTiles.map((tile): VideoExportKey =>
             tile.derived
               ? {
-                  type: "ratio",
+                  type: "op",
+                  op: tile.derived.op,
                   key: tile.key,
-                  key_num: tile.derived.num.key,
-                  key_den: tile.derived.den.key,
+                  key_a: tile.derived.left.key,
+                  key_b: tile.derived.right.key,
                   batch: DEFAULT_VIEW_OPTIONS.batch,
                   layout: "auto",
                   channel: DEFAULT_VIEW_OPTIONS.channel,
@@ -628,9 +671,9 @@ export function ComparePanel() {
                 : `按住 X 覆盖 ${overlaySourceIndex + 1} → 1`}
           </span>
         )}
-        {ratioEnabled && ratioAllowed && (
-          <span data-testid="ratio-status" className="text-amber-400">
-            比值 {ratioSwapped ? "1 ÷ 2" : "2 ÷ 1"}
+        {opEnabled && opAllowed && (
+          <span data-testid="op-status" className="text-amber-400">
+            {opById(opId).label} {formatOpExpr(opId, leftIndex, rightIndex)}
           </span>
         )}
         {equalHeight && referenceSize && (

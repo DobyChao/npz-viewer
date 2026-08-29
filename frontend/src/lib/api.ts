@@ -82,7 +82,7 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
   );
 }
 
-export interface RatioOperand {
+export interface OpOperand {
   path: string;
   key: string;
   version?: string;
@@ -124,21 +124,23 @@ export const api = {
     request<ArrayStats>("/npz/stats", { path, key, batch }),
   pixel: (path: string, key: string, x: number, y: number, batch = 0) =>
     request<PixelValue>("/npz/pixel", { path, key, x, y, batch }),
-  ratioPixel: (args: {
-    num: RatioOperand;
-    den: RatioOperand;
+  opPixel: (args: {
+    op: string;
+    left: OpOperand;
+    right: OpOperand;
     x: number;
     y: number;
   }) =>
-    request<PixelValue>("/npz/ratio/pixel", {
-      path_a: args.num.path,
-      key_a: args.num.key,
-      path_b: args.den.path,
-      key_b: args.den.key,
+    request<PixelValue>("/npz/op/pixel", {
+      op: args.op,
+      path_a: args.left.path,
+      key_a: args.left.key,
+      path_b: args.right.path,
+      key_b: args.right.key,
       x: args.x,
       y: args.y,
-      ...operandQuery("a", args.num.options),
-      ...operandQuery("b", args.den.options),
+      ...operandQuery("a", args.left.options),
+      ...operandQuery("b", args.right.options),
     }),
 
   sibling: (path: string, scope: "file" | "folder", direction: "next" | "prev") =>
@@ -211,31 +213,33 @@ export function thumbUrl(args: {
   })}`;
 }
 
-/** Folded into `v=` so immutable browser cache drops old ratio PNGs after divide-rule changes. */
-const RATIO_RENDER_CACHE = "2";
+/** Folded into `v=` so immutable browser cache drops old op PNGs after rule changes. */
+const OP_RENDER_CACHE = "1";
 
-export function ratioRenderUrl(args: {
-  num: RatioOperand;
-  den: RatioOperand;
+export function opRenderUrl(args: {
+  op: string;
+  left: OpOperand;
+  right: OpOperand;
   gamut: Gamut;
   version?: string;
   maxSize?: number;
   format?: "png" | "webp";
 }): string {
   const params: Params = {
-    path_a: args.num.path,
-    key_a: args.num.key,
-    path_b: args.den.path,
-    key_b: args.den.key,
-    gamut: args.num.options?.gamut ?? args.den.options?.gamut ?? args.gamut,
-    v: `${args.version ?? [args.num.version, args.den.version].filter(Boolean).join("|")}|r${RATIO_RENDER_CACHE}`,
-    ...operandQuery("a", args.num.options),
-    ...operandQuery("b", args.den.options),
+    op: args.op,
+    path_a: args.left.path,
+    key_a: args.left.key,
+    path_b: args.right.path,
+    key_b: args.right.key,
+    gamut: args.left.options?.gamut ?? args.right.options?.gamut ?? args.gamut,
+    v: `${args.version ?? [args.left.version, args.right.version].filter(Boolean).join("|")}|o${OP_RENDER_CACHE}`,
+    ...operandQuery("a", args.left.options),
+    ...operandQuery("b", args.right.options),
   };
-  const colormap = args.num.options?.colormap ?? args.den.options?.colormap;
+  const colormap = args.left.options?.colormap ?? args.right.options?.colormap;
   if (colormap && colormap !== "none") params.colormap = colormap;
-  if (args.num.options?.gainmapGamut || args.den.options?.gainmapGamut) params.gainmap_gamut = true;
+  if (args.left.options?.gainmapGamut || args.right.options?.gainmapGamut) params.gainmap_gamut = true;
   if (args.maxSize) params.max_size = args.maxSize;
   if (args.format) params.format = args.format;
-  return `${BASE}/npz/ratio/render${toQuery(params)}`;
+  return `${BASE}/npz/op/render${toQuery(params)}`;
 }

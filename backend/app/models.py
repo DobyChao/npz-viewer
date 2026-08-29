@@ -140,10 +140,11 @@ CompareGridLayout = Literal["auto", "1x1", "1x2", "2x1", "1x3", "3x1", "2x2"]
 
 
 class ExportKey(BaseModel):
-    type: Literal["key", "ratio"] = "key"
+    type: Literal["key", "op"] = "key"
+    op: str | None = None
     key: str = ""
-    key_num: str | None = None
-    key_den: str | None = None
+    key_a: str | None = None
+    key_b: str | None = None
     batch: int = 0
     layout: str = "auto"
     channel: int = 0
@@ -154,9 +155,9 @@ class ExportKey(BaseModel):
 
     @model_validator(mode="after")
     def require_identity(self) -> ExportKey:
-        if self.type == "ratio":
-            if not self.key_num or not self.key_den:
-                raise ValueError("比值格需要 key_num 和 key_den")
+        if self.type == "op":
+            if not self.op or not self.key_a or not self.key_b:
+                raise ValueError("算子格需要 op、key_a 和 key_b")
         elif not self.key:
             raise ValueError("需要 key")
         return self

@@ -209,8 +209,11 @@ backend/
 | GET | `/api/npz/render` | 见下 | `image/png` 或 `image/webp` |
 | GET | `/api/npz/thumb` | `path,key=,size=192,v=` | `image/webp` |
 | GET | `/api/npz/pixel` | `path,key,x,y,batch=` | `{values:[...]}`（对比视图取值读数用） |
-| GET | `/api/npz/ratio/render` | 见下 | 两图相除后按 gainmap 规则输出 PNG/WebP |
-| GET | `/api/npz/ratio/pixel` | 对齐后坐标系的 `x,y` + 两套 operand | `{values:[...]}`，**clip 前**的原始比值 |
+| GET | `/api/npz/ops` | — | `{ops:[{id,symbol,label,display}]}` 已注册二元算子 |
+| GET | `/api/npz/op/render` | 见下 | 两图套算子后输出 PNG/WebP |
+| GET | `/api/npz/op/pixel` | 对齐后坐标系的 `x,y` + 两套 operand + `op` | `{values:[...]}`，**clip 前**的原始结果 |
+| GET | `/api/npz/ratio/render` | — | `/op/render?op=div` 的别名 |
+| GET | `/api/npz/ratio/pixel` | — | `/op/pixel?op=div` 的别名 |
 | GET | `/api/nav/sibling` | `path, scope=file\|folder, direction=next\|prev` | `{path,name,index,total}` 或 404 |
 | GET | `/api/nav/locate` | `path` | `{path,name,index,total}` |
 | GET | `/api/nav/at` | `path, index` | 该目录自然序第 `index` 个 npz（0 起）；越界 400 |
@@ -254,7 +257,16 @@ format    png | webp           默认 png
 v         缓存击穿用的版本串（前端传 `${mtime}_${size}`），后端忽略其值
 ```
 
-`/api/npz/ratio/render`：`path_a,key_a` 为分子，`path_b,key_b` 为分母（`path_b` 缺省= `path_a`）。另有 `batch_a/b`、`layout_a/b`、`channel_a/b`，以及共用的 `gamut`、`colormap`、`gainmap_gamut`、`max_size`、`format`、`v`。后端在线性 float 上相除（`|den| < 1e-6` 时用同号 `1e-6` 保护，分子分母都接近 0 则记为 1）；`H×W` 不同时把像素数较小的那张 bilinear 放到较大的尺寸；一彩一灰则把灰 broadcast 成 3 通道。结果走 gainmap 管线（`clip(0,2)/2`）。
+`/api/npz/op/render`：`op` 为算子 id（`GET /ops` 列出）；`path_a,key_a` 为左操作数，`path_b,key_b` 为右操作数（`path_b` 缺省= `path_a`）。另有 `batch_a/b`、`layout_a/b`、`channel_a/b`，以及共用的 `gamut`、`colormap`、`gainmap_gamut`、`max_size`、`format`、`v`。后端在线性 float 上对齐后套算子：`H×W` 不同时把像素数较小的那张 bilinear 放到较大的尺寸；一彩一灰则把灰 broadcast 成 3 通道。
+
+当前算子：
+
+- `div`（除法）：`left / right`；`|right| < 1e-6` 时用同号 `1e-6` 保护，两边都接近 0 则记为 1。结果走 gainmap 管线（`clip(0,2)/2`）。
+- `mul`（乘法）：`left * right`。结果走普通线性 RGB（`clip(0,1)` + gamma）。
+
+新增算子：后端 `ops.OPERATORS` 注册 `id/symbol/label/display/apply`，前端 `lib/ops.ts` 的 `BINARY_OPS` 同步同一 id。
+
+`/api/npz/ratio/*` 仍可用，等价于 `op=div`。
 
 响应头必须带 `ETag`（= 缓存 key 的 hash）和 `Cache-Control: public, max-age=31536000, immutable`，并正确处理 `If-None-Match` 返回 304。
 
@@ -370,9 +382,9 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 
 **ComparePanel（FastStone 式，最关键的交互）**
 - 1~4 个 tile 按 `layout` 网格排布，**共享同一个 viewport transform**：任一 tile 内滚轮缩放（以光标位置为锚点）或拖拽平移，其余 tile 同步。
-- 工具栏：缩放百分比读数、`适应窗口` / `100%` 按钮、布局切换、A/B toggle 开关、覆盖、**比值**、面板三态切换（隐藏 / 分栏 / 占满）、关闭按钮。
-- A/B toggle：开启后只显示一个 tile，按 `空格` 在已选项之间循环切换（含比值格），用于像素级闪烁对比。切换时**不重置 viewport**。
-- **临时比值**：至少 2 张、不满 4 张源瓦片时可开。默认 **第 2 格 ÷ 第 1 格**（与覆盖 `2 → 1` 同一对），工具栏可互换成 `1 ÷ 2`。结果追加一格虚拟瓦片，按 gainmap 展示，不写回 npz。点该格移除只关比值。源瓦片满 4 张时按钮禁用。覆盖源选择只在真实瓦片上。
+- 工具栏：缩放百分比读数、`适应窗口` / `100%` 按钮、布局切换、A/B toggle 开关、覆盖、**算子**、面板三态切换（隐藏 / 分栏 / 占满）、关闭按钮。
+- A/B toggle：开启后只显示一个 tile，按 `空格` 在已选项之间循环切换（含算子格），用于像素级闪烁对比。切换时**不重置 viewport**。
+- **临时算子**：至少 2 张、不满 4 张源瓦片时可开。可选手册里的算子（默认除法）以及对比列表中任意两格。默认 **第 2 格 ÷ 第 1 格**（与覆盖 `2 → 1` 同一对）。结果追加一格虚拟瓦片，不写回 npz。点该格移除只关算子。源瓦片满 4 张时按钮禁用。覆盖源选择只在真实瓦片上。除法按 gainmap 展示，乘法按线性 RGB 展示。
 - 每个 tile 左上角显示标签 `npz文件名 / key`，右上角有单独移除按钮。
 - 顶部导航：`◀ 上一个 npz / 下一个 npz ▶`（同目录内）、`◀ 上级文件夹 / 下级 ▶`（兄弟文件夹里相同序号的 npz）。
 - **文件内模式跨文件跟随**：切到新 npz 后，用相同的 key 名重新构造 tile；如果新 npz 里没有这个 key，该位置渲染 `NotFoundTile` 占位（灰底 + `KEY NOT FOUND: <key>`），**不要塌陷布局**。
@@ -386,7 +398,7 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 | `←` / `→` | 同目录上一个 / 下一个 npz |
 | `↑` / `↓` | 兄弟文件夹中相同序号的 npz（上/下一个文件夹） |
 | `空格` | A/B toggle 切换 |
-| `G` | 开关临时比值格（需 2～3 张源瓦片） |
+| `G` | 开关临时算子格（需 2～3 张源瓦片） |
 | `P` | 文件内对比且已选起止帧时，进入序列并播放/暂停；跨文件或未选区间时忽略 |
 | `1`~`4` | 单独查看第 n 个 tile |
 | `F` | 对比面板占满 / 还原 |
@@ -412,7 +424,7 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 
 **导出**
 
-- 一条 MP4（H.264 / yuv420p / 无音轨），按当前宫格拼（含 auto 推导），格子标签为 `key` + 文件名；比值格标签为 `key_num ÷ key_den` + 文件名。不烤覆盖层、不烤 A/B 闪烁。比值格会烤进视频。
+- 一条 MP4（H.264 / yuv420p / 无音轨），按当前宫格拼（含 auto 推导），格子标签为 `key` + 文件名；算子格标签为 `key_a <symbol> key_b` + 文件名。不烤覆盖层、不烤 A/B 闪烁。算子格会烤进视频。
 - 两种裁剪：`full` 完整原图（等高跟随面板开关）；`viewport` 按对比面板当前缩放/平移裁，公式与像素读数一致：`effective = scale * scaleFactor`，`src = (-x/effective, -y/effective, tileW/effective, tileH/effective)`。
 - 长边上限 1080 / 1920 / 2160（默认 1920）。FPS 默认 12，范围 1–60。
 - 软上限 2000 帧（需 `confirm_large`），硬上限 10000。
@@ -421,7 +433,7 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 `POST /api/video/export` body：
 
 ```
-path, keys:[{type?: key|ratio, key, key_num?, key_den?, batch, layout, channel, normalize, colormap, alpha, gainmap_gamut}],
+path, keys:[{type?: key|op, op?, key, key_a?, key_b?, batch, layout, channel, normalize, colormap, alpha, gainmap_gamut}],
 gamut, start, end, fps, layout, crop: full|viewport, max_size, equal_height,
 confirm_large, save_dir?, viewport?: {scale,x,y,tile_width,tile_height,natural_sizes:[{width,height}]}
 ```
@@ -525,3 +537,4 @@ confirm_large, save_dir?, viewport?: {scale,x,y,tile_width,tile_height,natural_s
 | 2026-08-12 | 初版 | — |
 | 2026-08-28 | 对比面板临时比值 gainmap（默认 2÷1） | 线性数组相除，不写回 npz |
 | 2026-08-28 | 比值除法保留负分母符号；0/0 记为 1 | 噪声打出的负通道不再被当成 +eps 而画出黄角 |
+| 2026-08-29 | 比值归一为可扩展二元算子；新增乘法 | 工具栏选算子和两张源图；registry 加算子 |

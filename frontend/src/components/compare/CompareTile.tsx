@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import clsx from "clsx";
 import { FileQuestion, Layers, X } from "lucide-react";
-import { renderUrl, ratioRenderUrl } from "../../lib/api";
+import { renderUrl, opRenderUrl } from "../../lib/api";
 import { useImageResource } from "../../hooks/useImageResource";
 import { usePanZoom } from "../../hooks/usePanZoom";
 import { useAppStore } from "../../store/useAppStore";
@@ -19,8 +19,8 @@ export interface TileSpec {
   options: ViewOptions;
   missing: boolean;
   removable: boolean;
-  /** Present on the temporary 2÷1 gainmap tile. */
-  derived?: { num: TileSpec; den: TileSpec };
+  /** Present on the temporary binary-op tile. */
+  derived?: { op: string; left: TileSpec; right: TileSpec };
 }
 
 export interface OverlayLayer {
@@ -74,18 +74,19 @@ export function CompareTile({
   const urlFor = (target: TileSpec) => {
     if (target.missing) return null;
     if (target.derived) {
-      return ratioRenderUrl({
-        num: {
-          path: target.derived.num.npzPath,
-          key: target.derived.num.key,
-          version: target.derived.num.version,
-          options: target.derived.num.options,
+      return opRenderUrl({
+        op: target.derived.op,
+        left: {
+          path: target.derived.left.npzPath,
+          key: target.derived.left.key,
+          version: target.derived.left.version,
+          options: target.derived.left.options,
         },
-        den: {
-          path: target.derived.den.npzPath,
-          key: target.derived.den.key,
-          version: target.derived.den.version,
-          options: target.derived.den.options,
+        right: {
+          path: target.derived.right.npzPath,
+          key: target.derived.right.key,
+          version: target.derived.right.version,
+          options: target.derived.right.options,
         },
         gamut,
         version: target.version,

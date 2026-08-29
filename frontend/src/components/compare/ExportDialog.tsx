@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { dirname } from "../../lib/format";
+import { formatOpKeys } from "../../lib/ops";
 import type { CompareLayout, Gamut, VideoCrop, VideoExportKey, VideoExportRequest } from "../../lib/types";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
 import type { Viewport } from "../../store/useCompareStore";
@@ -133,8 +134,8 @@ export function ExportDialog({
           {(cells ?? keys).map((cell) =>
             typeof cell === "string"
               ? cell
-              : cell.type === "ratio"
-                ? `${cell.key_num} ÷ ${cell.key_den}`
+              : cell.type === "op"
+                ? formatOpKeys(cell.op ?? "div", cell.key_a ?? "", cell.key_b ?? "")
                 : cell.key,
           ).join(" · ")}{" "}
           · {frameCount} 帧 · 宫格{" "}

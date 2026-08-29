@@ -22,7 +22,7 @@ export function SequenceBar({
   viewport,
   measureTile,
   naturalSizes,
-  ratio = null,
+  op = null,
   exportCells,
 }: {
   path: string;
@@ -33,7 +33,7 @@ export function SequenceBar({
   viewport: Viewport;
   measureTile: () => { width: number; height: number };
   naturalSizes: { width: number; height: number }[];
-  ratio?: { num: string; den: string } | null;
+  op?: { id: string; left: string; right: string } | null;
   exportCells?: VideoExportKey[];
 }) {
   const sequence = useCompareStore((state) => state.sequence);
@@ -69,7 +69,7 @@ export function SequenceBar({
     keys,
     gamut,
     enabled: keys.length > 0 && sequence.engaged,
-    ratio,
+    op,
   });
 
   const locateQuery = useQuery({
