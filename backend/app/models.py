@@ -132,6 +132,8 @@ class SiblingResult(BaseModel):
     name: str
     index: int
     total: int
+    mtime: float
+    size: int
 
 
 VideoJobStatus = Literal["queued", "running", "done", "error", "cancelled"]

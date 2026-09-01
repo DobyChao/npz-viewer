@@ -60,6 +60,13 @@ test("playing a range changes tile filenames without moving the file list", asyn
   await expect(page.getByTestId("sequence-play")).toBeEnabled();
   await expect(page.getByTestId("sequence-export")).toBeEnabled();
 
+  const renderUrls: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/npz/render") || request.url().includes("/npz/op/render")) {
+      renderUrls.push(request.url());
+    }
+  });
+
   await page.getByTestId("sequence-play").click();
   await expect(page.getByTestId("sequence-play")).toHaveAttribute("title", "暂停（P）");
   await expect(page.getByTestId("compare-tile").first()).toContainText("frame_003", {
@@ -71,6 +78,11 @@ test("playing a range changes tile filenames without moving the file list", asyn
   await expect(
     page.locator('[data-testid="npz-row"][data-path$="frame_001.npz"]'),
   ).toHaveAttribute("data-selected", "true");
+
+  expect(renderUrls.length).toBeGreaterThan(0);
+  for (const url of renderUrls) {
+    expect(url, url).toMatch(/[?&]v=/);
+  }
 });
 
 test("clicking a list file exits sequence mode and updates compare tiles", async ({ page }) => {
@@ -113,6 +125,43 @@ test("pausing sequence stops prefetch requests", async ({ page }) => {
   await page.waitForTimeout(600);
   expect(navAt).toBe(0);
   expect(render).toBe(0);
+});
+
+test("scrubbing skips intermediate frames until the target is painted", async ({ page }) => {
+  await selectSampleFrame(page);
+  await openInsideCompare(page, ["rgb_hwc"]);
+
+  await page.getByTestId("sequence-start").fill("1");
+  await page.getByTestId("sequence-end").fill("3");
+  await page.getByTestId("sequence-engage").click();
+  await expect(page.getByTestId("sequence-bar")).toHaveAttribute("data-engaged", "true");
+  await expect(page.getByTestId("compare-tile").first()).toContainText("frame_001");
+
+  const seen = await page.getByTestId("compare-tile").first().evaluate(async (tile) => {
+    const names: string[] = [];
+    const read = () => {
+      const match = (tile.textContent ?? "").match(/frame_\d+/);
+      if (match && names[names.length - 1] !== match[0]) names.push(match[0]);
+    };
+    read();
+    const observer = new MutationObserver(read);
+    observer.observe(tile, { subtree: true, childList: true, characterData: true });
+    const input = document.querySelector("[data-testid='sequence-scrubber']") as HTMLInputElement;
+    for (const value of ["1", "2"]) {
+      input.value = value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    input.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 2500));
+    observer.disconnect();
+    read();
+    return names;
+  });
+
+  expect(seen[0]).toBe("frame_001");
+  expect(seen.at(-1)).toBe("frame_003");
+  expect(seen).not.toContain("frame_002");
+  await expect(page.getByTestId("compare-tile").first()).toContainText("frame_003");
 });
 
 test("cross-file compare hides the sequence bar", async ({ page }) => {

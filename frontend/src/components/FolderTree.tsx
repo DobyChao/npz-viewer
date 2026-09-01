@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { ChevronDown, ChevronRight, Folder, FolderOpen, RefreshCw } from "lucide-react";
 import { api } from "../lib/api";
+import { invalidateAfterFsRefresh } from "../lib/refresh";
 import { useAppStore } from "../store/useAppStore";
 import { Checkbox, EmptyState, ErrorBox, IconButton, SectionHeader, Spinner, TextInput } from "./ui";
 
@@ -133,8 +134,7 @@ export function FolderTree() {
   const refresh = useMutation({
     mutationFn: () => api.refresh(currentDir ?? activeRoot?.path ?? ""),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["dirs"] });
-      void queryClient.invalidateQueries({ queryKey: ["npz-list"] });
+      invalidateAfterFsRefresh(queryClient);
     },
   });
 

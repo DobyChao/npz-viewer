@@ -214,9 +214,9 @@ backend/
 | GET | `/api/npz/op/pixel` | 对齐后坐标系的 `x,y` + 两套 operand + `op` | `{values:[...]}`，**clip 前**的原始结果 |
 | GET | `/api/npz/ratio/render` | — | `/op/render?op=div` 的别名 |
 | GET | `/api/npz/ratio/pixel` | — | `/op/pixel?op=div` 的别名 |
-| GET | `/api/nav/sibling` | `path, scope=file\|folder, direction=next\|prev` | `{path,name,index,total}` 或 404 |
-| GET | `/api/nav/locate` | `path` | `{path,name,index,total}` |
-| GET | `/api/nav/at` | `path, index` | 该目录自然序第 `index` 个 npz（0 起）；越界 400 |
+| GET | `/api/nav/sibling` | `path, scope=file\|folder, direction=next\|prev` | `{path,name,index,total,mtime,size}` 或 404 |
+| GET | `/api/nav/locate` | `path` | `{path,name,index,total,mtime,size}` |
+| GET | `/api/nav/at` | `path, index` | 该目录自然序第 `index` 个 npz（0 起）；越界 400；`mtime/size` 来自对该文件的 live stat |
 | POST | `/api/video/export` | 见 §6.6 | `{id,status,current,total}` |
 | GET | `/api/video/jobs/{id}` | — | `{id,status,current,total,error,filename,saved_path}` |
 | POST | `/api/video/jobs/{id}/cancel` | — | 更新后的 job |
@@ -268,7 +268,9 @@ v         缓存击穿用的版本串（前端传 `${mtime}_${size}`），后端
 
 `/api/npz/ratio/*` 仍可用，等价于 `op=div`。
 
-响应头必须带 `ETag`（= 缓存 key 的 hash）和 `Cache-Control: public, max-age=31536000, immutable`，并正确处理 `If-None-Match` 返回 304。
+带 `v=` 的响应头必须是 `Cache-Control: public, max-age=31536000, immutable` 和 `ETag`（= 缓存 key 的 hash），并正确处理 `If-None-Match` 返回 304。没有 `v=` 时改为 `private, max-age=0, must-revalidate`（序列播放漏传版本时不能把改写后的 npz 锁进浏览器缓存）。
+
+文件内序列播放的 render URL **必须**带当前帧的 `v=`（来自 `/nav/at` 对该文件的 live stat，而不是 dirindex 快照）。前端 `imageCache` 以完整 URL 为键；刷新目录会 bump render epoch 并清空 navCache。
 
 **错误约定**：统一 `{"detail": {"code": "...", "message": "...", "hint": "..."}}`，HTTP 状态用 400/403/404/415/500。`code` 至少包含 `PATH_OUTSIDE_ROOT`、`FILE_NOT_FOUND`、`KEY_NOT_FOUND`、`UNSUPPORTED_KIND`、`NEEDS_PICKLE`、`BAD_PARAM`。
 
@@ -385,7 +387,8 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 - 工具栏：缩放百分比读数、`适应窗口` / `100%` 按钮、布局切换、A/B toggle 开关、覆盖、**算子**、面板三态切换（隐藏 / 分栏 / 占满）、关闭按钮。
 - A/B toggle：开启后只显示一个 tile，按 `空格` 在已选项之间循环切换（含算子格），用于像素级闪烁对比。切换时**不重置 viewport**。
 - **临时算子**：至少 2 张、不满 4 张源瓦片时可开。可选手册里的算子（默认除法）以及对比列表中任意两格。默认 **第 2 格 ÷ 第 1 格**（与覆盖 `2 → 1` 同一对）。结果追加一格虚拟瓦片，不写回 npz。点该格移除只关算子。源瓦片满 4 张时按钮禁用。覆盖始终叠到第 1 格；覆盖源可以是第 1 格以外的任意格（含算子格）。除法按 gainmap 展示，乘法按线性 RGB 展示。
-- 每个 tile 左上角显示标签 `npz文件名 / key`，右上角有单独移除按钮。
+- 源瓦片可前移/后移（算子格始终在最后）。重排后算子操作数和覆盖源按身份跟随原图：文件内用 key，跨文件用 `(npz路径, key)`。若覆盖源被排到第 1 格，改选第 2 格。操作数下拉在 key 冲突或多文件时带上文件名（文件名也冲突则带上末两级路径）。
+- 每个 tile 左上角显示标签 `npz文件名 / key`，右上角有前移/后移（仅源格）和移除按钮。
 - 顶部导航：`◀ 上一个 npz / 下一个 npz ▶`（同目录内）、`◀ 上级文件夹 / 下级 ▶`（兄弟文件夹里相同序号的 npz）。
 - **文件内模式跨文件跟随**：切到新 npz 后，用相同的 key 名重新构造 tile；如果新 npz 里没有这个 key，该位置渲染 `NotFoundTile` 占位（灰底 + `KEY NOT FOUND: <key>`），**不要塌陷布局**。
 - 鼠标悬停时在工具栏显示当前像素坐标和原始数值（调 `/api/npz/pixel`，节流 100ms）。
@@ -420,6 +423,7 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 - 序列模式中 playhead 只改对比瓦片用的 path，**不** `jumpToFile`，文件列表保持原选中项。暂停后可「定位到当前帧」。←/→ 在序列模式暂停时步进 playhead。
 - 播放中可继续平移缩放；空格仍是 A/B。播到结束帧后停止，停在最后一帧（仍留在序列模式）；再按播放从起始帧重来。
 - 仅播放中预取后续帧到内存并钉住；暂停或退出后停止。每一帧等上一帧画完再切，缓存命中也不跳帧。下一帧未就绪则等待（降低有效 fps），不盖加载转圈。
+- 拖 scrubber 时 playhead 立刻走，对比图停在上一张直到**目标帧**解码完成；不把拖过的中间帧（即使已在预取缓存里）画出来。松开后再切到目标。
 - 新文件没有某 key：该格 KEY NOT FOUND 占位，不塌布局。
 
 **导出**
@@ -539,3 +543,6 @@ confirm_large, save_dir?, viewport?: {scale,x,y,tile_width,tile_height,natural_s
 | 2026-08-28 | 比值除法保留负分母符号；0/0 记为 1 | 噪声打出的负通道不再被当成 +eps 而画出黄角 |
 | 2026-08-29 | 比值归一为可扩展二元算子；新增乘法 | 工具栏选算子和两张源图；registry 加算子 |
 | 2026-08-29 | 覆盖源可含算子格 | 仍叠到第 1 格；点格子右上角图层按钮切换覆盖源 |
+| 2026-08-29 | 对比格可重排；算子/覆盖按 (路径, key) 跟随 | 文件内只用 key；操作数下拉在重名时带文件提示 |
+| 2026-09-01 | 序列播放 render URL 带 live `v=`；无 `v=` 不标 immutable | 文件改写后对比 video 仍命中旧 HTTP / imageCache |
+| 2026-09-01 | 拖 scrubber 等到目标帧就绪才换图 | 拖过预取窗口会先闪中间缓存帧再跳到目标 |

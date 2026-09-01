@@ -26,7 +26,7 @@ import { useAppStore } from "../../store/useAppStore";
 import { canEnableOp, clampOperand, useCompareStore } from "../../store/useCompareStore";
 import type { CompareLayout, VideoExportKey } from "../../lib/types";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
-import { BINARY_OPS, formatOpExpr, formatOpKeys, opById } from "../../lib/ops";
+import { BINARY_OPS, formatOpExpr, formatOpKeys, operandOptionLabel, opById } from "../../lib/ops";
 import { Button, EmptyState, IconButton, SectionHeader, Select } from "../ui";
 import { CompareTile } from "./CompareTile";
 import type { TileSpec } from "./CompareTile";
@@ -92,6 +92,7 @@ export function ComparePanel() {
   const setOpLeft = useCompareStore((state) => state.setOpLeft);
   const setOpRight = useCompareStore((state) => state.setOpRight);
   const swapOpOperands = useCompareStore((state) => state.swapOpOperands);
+  const moveSource = useCompareStore((state) => state.moveSource);
   const setOverlayEnabled = useCompareStore((state) => state.setOverlayEnabled);
   const setOverlaySource = useCompareStore((state) => state.setOverlaySource);
   const setOverlayPeek = useCompareStore((state) => state.setOverlayPeek);
@@ -115,9 +116,16 @@ export function ComparePanel() {
     queryFn: () => api.meta(tilePath!),
     enabled: Boolean(tilePath) && mode === "inside" && !sequence.playing,
     placeholderData: keepPreviousData,
+    staleTime: 0,
   });
   const tileMeta = playMeta ?? meta;
-  const tileVersion = sequenceDriving ? "" : tileMeta ? versionOf(tileMeta) : version;
+  // Sequence used to omit v= so prefetch URLs matched the tiles; that made
+  // HTTP + imageCache keep a rewritten npz forever. Stamp comes from nav/at.
+  const tileVersion = sequenceDriving
+    ? sequence.playVersion || (tileMeta && tileMeta.path === tilePath ? versionOf(tileMeta) : "")
+    : tileMeta
+      ? versionOf(tileMeta)
+      : version;
   const tileName = sequenceDriving
     ? (sequence.playName ?? tileMeta?.name ?? meta?.name ?? "")
     : (tileMeta?.name ?? meta?.name ?? "");
@@ -492,7 +500,7 @@ export function ComparePanel() {
                 value={String(leftIndex)}
                 options={tiles.map((tile, index) => ({
                   value: String(index),
-                  label: `${index + 1} ${tile.key}`,
+                  label: operandOptionLabel(tile, index, tiles),
                 }))}
                 onChange={(value) => setOpLeft(Number(value))}
               />
@@ -502,7 +510,7 @@ export function ComparePanel() {
                 value={String(rightIndex)}
                 options={tiles.map((tile, index) => ({
                   value: String(index),
-                  label: `${index + 1} ${tile.key}`,
+                  label: operandOptionLabel(tile, index, tiles),
                 }))}
                 onChange={(value) => setOpRight(Number(value))}
               />
@@ -560,7 +568,9 @@ export function ComparePanel() {
           data-testid="compare-grid"
           className={clsx("grid min-h-0 flex-1 gap-px bg-zinc-800", gridClassFor(effectiveLayout))}
         >
-          {visibleTiles.map((tile, index) => (
+          {visibleTiles.map((tile, index) => {
+            const sourceIndex = tiles.findIndex((item) => item.id === tile.id);
+            return (
             <CompareTile
               key={tile.id}
               spec={tile}
@@ -590,8 +600,19 @@ export function ComparePanel() {
               onNaturalSize={handleNaturalSize}
               onHoverPixel={handleHoverPixel}
               onRemove={tile.removable ? () => removeTile(tile) : undefined}
+              onMoveEarlier={
+                toggleIndex === null && sourceIndex > 0
+                  ? () => moveSource(sourceIndex, sourceIndex - 1)
+                  : undefined
+              }
+              onMoveLater={
+                toggleIndex === null && sourceIndex >= 0 && sourceIndex < tiles.length - 1
+                  ? () => moveSource(sourceIndex, sourceIndex + 1)
+                  : undefined
+              }
             />
-          ))}
+            );
+          })}
         </div>
       )}
 

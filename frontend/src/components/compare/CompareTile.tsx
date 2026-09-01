@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import clsx from "clsx";
-import { FileQuestion, Layers, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileQuestion, Layers, X } from "lucide-react";
 import { renderUrl, opRenderUrl } from "../../lib/api";
 import { useImageResource } from "../../hooks/useImageResource";
 import { usePanZoom } from "../../hooks/usePanZoom";
@@ -54,6 +54,8 @@ export function CompareTile({
   onNaturalSize,
   onHoverPixel,
   onRemove,
+  onMoveEarlier,
+  onMoveLater,
 }: {
   spec: TileSpec;
   viewport: Viewport;
@@ -66,6 +68,8 @@ export function CompareTile({
   onNaturalSize: (id: string, size: { width: number; height: number }) => void;
   onHoverPixel: (spec: TileSpec, x: number, y: number) => void;
   onRemove?: () => void;
+  onMoveEarlier?: () => void;
+  onMoveLater?: () => void;
 }) {
   const gamut = useAppStore((state) => state.gamut);
   const setViewport = useCompareStore((state) => state.setViewport);
@@ -130,16 +134,38 @@ export function CompareTile({
           <div className="mt-0.5 font-mono text-[11px] text-zinc-600">{spec.key}</div>
           <div className="mt-1 truncate text-[10px] text-zinc-700">{spec.npzName}</div>
         </div>
-        {onRemove && (
-          <IconButton
-            title="从对比中移除（当前 npz 没有这个 key）"
-            data-testid="remove-tile"
-            className="absolute top-1 right-1 h-5 w-5 bg-black/65"
-            onClick={onRemove}
-          >
-            <X size={11} />
-          </IconButton>
-        )}
+        <div className="absolute top-1 right-1 flex items-center gap-1">
+          {onMoveEarlier && (
+            <IconButton
+              title="前移（对比顺序）"
+              data-testid="move-tile-earlier"
+              className="h-5 w-5 bg-black/65"
+              onClick={onMoveEarlier}
+            >
+              <ChevronLeft size={11} />
+            </IconButton>
+          )}
+          {onMoveLater && (
+            <IconButton
+              title="后移（对比顺序）"
+              data-testid="move-tile-later"
+              className="h-5 w-5 bg-black/65"
+              onClick={onMoveLater}
+            >
+              <ChevronRight size={11} />
+            </IconButton>
+          )}
+          {onRemove && (
+            <IconButton
+              title="从对比中移除（当前 npz 没有这个 key）"
+              data-testid="remove-tile"
+              className="h-5 w-5 bg-black/65"
+              onClick={onRemove}
+            >
+              <X size={11} />
+            </IconButton>
+          )}
+        </div>
       </div>
     );
   }
@@ -218,6 +244,26 @@ export function CompareTile({
       </div>
 
       <div className="absolute top-1 right-1 flex items-center gap-1">
+        {onMoveEarlier && (
+          <IconButton
+            title="前移（对比顺序）"
+            data-testid="move-tile-earlier"
+            className="h-5 w-5 bg-black/65"
+            onClick={onMoveEarlier}
+          >
+            <ChevronLeft size={11} />
+          </IconButton>
+        )}
+        {onMoveLater && (
+          <IconButton
+            title="后移（对比顺序）"
+            data-testid="move-tile-later"
+            className="h-5 w-5 bg-black/65"
+            onClick={onMoveLater}
+          >
+            <ChevronRight size={11} />
+          </IconButton>
+        )}
         {onPickOverlaySource && (
           <IconButton
             title="用这一格作为覆盖源"

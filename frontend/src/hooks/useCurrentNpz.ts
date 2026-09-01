@@ -17,6 +17,7 @@ export function useCurrentNpz(): CurrentNpz {
     queryKey: ["npz-meta", path],
     queryFn: () => api.meta(path!),
     enabled: Boolean(path),
+    staleTime: 0,
   });
 
   return {

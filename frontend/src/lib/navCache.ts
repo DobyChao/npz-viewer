@@ -14,6 +14,22 @@ export function peekSibling(anchor: string, index: number): SiblingResult | null
   return ready.get(cacheKey(anchor, index)) ?? null;
 }
 
+export function clearNavCache(directory?: string): void {
+  if (!directory) {
+    ready.clear();
+    order.length = 0;
+    return;
+  }
+  const prefix = `${directory}\0`;
+  for (const key of [...ready.keys()]) {
+    if (key.startsWith(prefix)) ready.delete(key);
+  }
+  for (let index = order.length - 1; index >= 0; index -= 1) {
+    const key = order[index];
+    if (key && !ready.has(key)) order.splice(index, 1);
+  }
+}
+
 export async function loadSibling(anchor: string, index: number): Promise<SiblingResult> {
   const key = cacheKey(anchor, index);
   const hit = ready.get(key);

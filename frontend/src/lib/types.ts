@@ -116,6 +116,8 @@ export interface SiblingResult {
   name: string;
   index: number;
   total: number;
+  mtime: number;
+  size: number;
 }
 
 export interface VideoExportKey {

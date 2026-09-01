@@ -160,6 +160,20 @@ export function versionOf(file: { mtime: number; size: number }): string {
   return `${Math.round(file.mtime * 1000)}_${file.size}`;
 }
 
+/** Bumped on explicit refresh so same-second rewrites still drop HTTP / memory cache. */
+let renderEpoch = 0;
+
+export function bumpRenderEpoch(): void {
+  renderEpoch += 1;
+}
+
+function versionParam(version?: string): string | undefined {
+  if (version && renderEpoch) return `${version}.e${renderEpoch}`;
+  if (version) return version;
+  if (renderEpoch) return `e${renderEpoch}`;
+  return undefined;
+}
+
 export interface RenderRequest {
   path: string;
   key: string;
@@ -183,7 +197,7 @@ export function renderUrl({
     path,
     key,
     gamut: options?.gamut ?? gamut,
-    v: version,
+    v: versionParam(version),
   };
   if (options?.layout) params.layout = options.layout;
   if (options?.batch) params.batch = options.batch;
@@ -209,7 +223,7 @@ export function thumbUrl(args: {
     prefer: args.prefer,
     size: args.size ?? 192,
     gamut: args.gamut,
-    v: args.version,
+    v: versionParam(args.version),
   })}`;
 }
 
@@ -232,7 +246,9 @@ export function opRenderUrl(args: {
     path_b: args.right.path,
     key_b: args.right.key,
     gamut: args.left.options?.gamut ?? args.right.options?.gamut ?? args.gamut,
-    v: `${args.version ?? [args.left.version, args.right.version].filter(Boolean).join("|")}|o${OP_RENDER_CACHE}`,
+    v: versionParam(
+      `${args.version ?? [args.left.version, args.right.version].filter(Boolean).join("|")}|o${OP_RENDER_CACHE}`,
+    ),
     ...operandQuery("a", args.left.options),
     ...operandQuery("b", args.right.options),
   };

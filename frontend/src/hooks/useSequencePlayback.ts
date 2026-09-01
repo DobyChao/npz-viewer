@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "react";
-import { opRenderUrl, renderUrl } from "../lib/api";
-import { isImageReady, loadImage, mapPool, releaseImage, retainImage } from "../lib/imageCache";
+import { versionOf } from "../lib/api";
+import { isImageReady, releaseImage, retainImage } from "../lib/imageCache";
 import { loadSibling } from "../lib/navCache";
+import { ensureUrls, urlsFor, type SequenceOp } from "../lib/sequenceFrames";
 import { useCompareStore } from "../store/useCompareStore";
 import type { Gamut } from "../lib/types";
 
 const PREFETCH = 12;
-const PREFETCH_CONCURRENCY = 2;
 
 export function rangeReady(start: number | null, end: number | null): boolean {
   return start !== null && end !== null && start <= end;
@@ -18,32 +18,6 @@ function sleep(ms: number): Promise<void> {
 
 function nextPaint(): Promise<void> {
   return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
-}
-
-function urlsFor(
-  filePath: string,
-  keys: string[],
-  gamut: Gamut,
-  op: { id: string; left: string; right: string } | null,
-): string[] {
-  const urls = keys.map((key) => renderUrl({ path: filePath, key, gamut }));
-  if (op) {
-    urls.push(
-      opRenderUrl({
-        op: op.id,
-        left: { path: filePath, key: op.left },
-        right: { path: filePath, key: op.right },
-        gamut,
-      }),
-    );
-  }
-  return urls;
-}
-
-async function ensureUrls(urls: string[]): Promise<void> {
-  await mapPool(urls, PREFETCH_CONCURRENCY, async (url) => {
-    await loadImage(url);
-  });
 }
 
 function syncPins(previous: string[], next: string[]): string[] {
@@ -63,7 +37,7 @@ export function useSequencePlayback(args: {
   keys: string[];
   gamut: Gamut;
   enabled: boolean;
-  op?: { id: string; left: string; right: string } | null;
+  op?: SequenceOp | null;
 }): void {
   const playing = useCompareStore((state) => state.sequence.playing);
   const fps = useCompareStore((state) => state.sequence.fps);
@@ -101,7 +75,7 @@ export function useSequencePlayback(args: {
           if (cancelled) return;
           const file = await loadSibling(anchor, index);
           if (cancelled) return;
-          const urls = urlsFor(file.path, keys, gamut, opRef.current);
+          const urls = urlsFor(file, keys, gamut, opRef.current);
           windowUrls.push(...urls);
           if (nearestMissing === null && !urls.every(isImageReady)) nearestMissing = urls;
         }
@@ -139,6 +113,7 @@ export function useSequencePlayback(args: {
           playhead: head,
           playPath: current.path,
           playName: current.name,
+          playVersion: versionOf(current),
         });
         await nextPaint();
       } catch {
@@ -157,7 +132,7 @@ export function useSequencePlayback(args: {
         const next = current + 1;
         try {
           const file = await loadSibling(anchor, next);
-          const urls = urlsFor(file.path, keysRef.current, gamut, opRef.current);
+          const urls = urlsFor(file, keysRef.current, gamut, opRef.current);
           if (!urls.every(isImageReady)) await ensureUrls(urls);
           if (stopped) return;
           const wait = due - performance.now();
@@ -169,6 +144,7 @@ export function useSequencePlayback(args: {
             playhead: next,
             playPath: file.path,
             playName: file.name,
+            playVersion: versionOf(file),
           });
           await nextPaint();
           due += frameMs;

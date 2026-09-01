@@ -6,7 +6,7 @@ from pathlib import Path
 from ..errors import BadParam, FileNotFound
 from ..models import SiblingResult
 from ..paths import natural_key, to_posix
-from .dirindex import dir_index
+from .dirindex import FileEntry, dir_index
 
 # A run of npz-less sibling folders should not turn navigation into a dead end.
 MAX_FOLDER_PROBES = 64
@@ -14,6 +14,30 @@ MAX_FOLDER_PROBES = 64
 
 def _step(index: int, direction: str) -> int:
     return index + (1 if direction == "next" else -1)
+
+
+def _stamp(path: Path, fallback: FileEntry | None = None) -> tuple[float, int]:
+    """Live file stamp. Dirindex mtimes go stale when a file is overwritten in place."""
+    try:
+        stat = path.stat()
+        return stat.st_mtime, stat.st_size
+    except OSError:
+        if fallback is not None:
+            return fallback.mtime, fallback.size
+        raise
+
+
+def _sibling(directory: Path, entry: FileEntry, index: int, total: int) -> SiblingResult:
+    path = directory / entry.name
+    mtime, size = _stamp(path, entry)
+    return SiblingResult(
+        path=to_posix(path),
+        name=entry.name,
+        index=index,
+        total=total,
+        mtime=mtime,
+        size=size,
+    )
 
 
 def sibling_file(path: Path, direction: str) -> SiblingResult:
@@ -25,13 +49,7 @@ def sibling_file(path: Path, direction: str) -> SiblingResult:
     target = _step(index, direction)
     if not 0 <= target < len(snapshot.entries):
         raise FileNotFound(f"{to_posix(path.parent)} 中没有更多 npz")
-    entry = snapshot.entries[target]
-    return SiblingResult(
-        path=to_posix(path.parent / entry.name),
-        name=entry.name,
-        index=target,
-        total=len(snapshot.entries),
-    )
+    return _sibling(path.parent, snapshot.entries[target], target, len(snapshot.entries))
 
 
 def sibling_folder(path: Path, direction: str) -> SiblingResult:
@@ -69,13 +87,7 @@ def sibling_folder(path: Path, direction: str) -> SiblingResult:
         if not snapshot.entries:
             continue
         target = min(ordinal, len(snapshot.entries) - 1)
-        entry = snapshot.entries[target]
-        return SiblingResult(
-            path=to_posix(candidate_dir / entry.name),
-            name=entry.name,
-            index=target,
-            total=len(snapshot.entries),
-        )
+        return _sibling(candidate_dir, snapshot.entries[target], target, len(snapshot.entries))
 
     raise FileNotFound(f"{to_posix(grandparent)} 中没有更多含 npz 的兄弟文件夹")
 
@@ -85,8 +97,15 @@ def locate(path: Path) -> SiblingResult:
     index = snapshot.index_of(path.name)
     if index < 0:
         raise FileNotFound(to_posix(path))
+    entry = snapshot.entries[index]
+    mtime, size = _stamp(path, entry)
     return SiblingResult(
-        path=to_posix(path), name=path.name, index=index, total=len(snapshot.entries)
+        path=to_posix(path),
+        name=path.name,
+        index=index,
+        total=len(snapshot.entries),
+        mtime=mtime,
+        size=size,
     )
 
 
@@ -98,13 +117,7 @@ def sibling_at(path: Path, index: int) -> SiblingResult:
         raise FileNotFound(f"{to_posix(path.parent)} 中没有 npz")
     if not 0 <= index < total:
         raise BadParam(f"序号越界: {index}，有效范围 0~{total - 1}")
-    entry = snapshot.entries[index]
-    return SiblingResult(
-        path=to_posix(path.parent / entry.name),
-        name=entry.name,
-        index=index,
-        total=total,
-    )
+    return _sibling(path.parent, snapshot.entries[index], index, total)
 
 
 def sorted_subdir_names(directory: Path) -> list[str]:

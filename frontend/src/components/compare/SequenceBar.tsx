@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Download, Film, Pause, Play, Locate } from "lucide-react";
-import { api } from "../../lib/api";
+import { api, versionOf } from "../../lib/api";
 import { dirname } from "../../lib/format";
-import { loadSibling, peekSibling } from "../../lib/navCache";
+import { clearNavCache, loadSibling, peekSibling } from "../../lib/navCache";
+import { ensureUrls, frameReady, urlsFor } from "../../lib/sequenceFrames";
 import { useHotkeys } from "../../hooks/useHotkeys";
 import { rangeReady, useSequencePlayback } from "../../hooks/useSequencePlayback";
 import { useAppStore } from "../../store/useAppStore";
@@ -42,6 +43,16 @@ export function SequenceBar({
   const exitSequence = useCompareStore((state) => state.exitSequence);
   const jumpToFile = useAppStore((state) => state.jumpToFile);
   const [exportOpen, setExportOpen] = useState(false);
+  const seekGen = useRef(0);
+  const seekTimer = useRef(0);
+  const keysRef = useRef(keys);
+  keysRef.current = keys;
+  const opRef = useRef(op);
+  opRef.current = op;
+  const gamutRef = useRef(gamut);
+  gamutRef.current = gamut;
+  const pathRef = useRef(path);
+  pathRef.current = path;
 
   const dir = dirname(path);
   const prevDir = useRef(dir);
@@ -97,23 +108,79 @@ export function SequenceBar({
 
   const canExport = rangeReady(sequence.start, sequence.end) && keys.length > 0;
 
-  const seekTo = (index: number, playing: boolean) => {
-    const cached = peekSibling(path, index);
+  const commitSeek = async (index: number, restamp: boolean, gen: number) => {
+    const anchor = pathRef.current;
+    if (restamp) clearNavCache(dirname(anchor));
+    try {
+      const file = await loadSibling(anchor, index);
+      if (gen !== seekGen.current) return;
+      await ensureUrls(urlsFor(file, keysRef.current, gamutRef.current, opRef.current));
+      if (gen !== seekGen.current) return;
+      const latest = useCompareStore.getState().sequence;
+      if (!latest.engaged || latest.playhead !== index) return;
+      setSequence({
+        playPath: file.path,
+        playName: file.name,
+        playVersion: versionOf(file),
+      });
+    } catch {
+      // Keep the last painted frame; the scrubber/playhead already moved.
+    }
+  };
+
+  const seekTo = (index: number, playing: boolean, opts?: { restamp?: boolean; defer?: boolean }) => {
+    const restamp = opts?.restamp ?? false;
+    const defer = opts?.defer ?? false;
+    window.clearTimeout(seekTimer.current);
+    seekGen.current += 1;
+    const gen = seekGen.current;
+
+    // Arrow-step a cached neighbour: swap immediately. Scrubber must not take
+    // this path — dragging through the prefetch window would flash every hit.
+    if (!defer && !restamp) {
+      const cached = peekSibling(pathRef.current, index);
+      if (cached && frameReady(cached, keysRef.current, gamutRef.current, opRef.current)) {
+        setSequence({
+          engaged: true,
+          playing,
+          playhead: index,
+          playPath: cached.path,
+          playName: cached.name,
+          playVersion: versionOf(cached),
+        });
+        return;
+      }
+    }
+
     setSequence({
       engaged: true,
       playing,
       playhead: index,
-      playPath: cached?.path ?? null,
-      playName: cached?.name ?? null,
     });
-    if (cached) return;
-    void loadSibling(path, index).then((file) => {
-      const latest = useCompareStore.getState().sequence;
-      if (latest.engaged && latest.playhead === index) {
-        setSequence({ playPath: file.path, playName: file.name });
-      }
-    });
+    if (defer) {
+      seekTimer.current = window.setTimeout(() => {
+        void commitSeek(index, restamp, gen);
+      }, 50) as unknown as number;
+      return;
+    }
+    void commitSeek(index, restamp, gen);
   };
+
+  const flushSeek = () => {
+    window.clearTimeout(seekTimer.current);
+    const index = useCompareStore.getState().sequence.playhead;
+    if (index === null) return;
+    const gen = seekGen.current;
+    void commitSeek(index, false, gen);
+  };
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(seekTimer.current);
+      seekGen.current += 1;
+    },
+    [],
+  );
 
   const enterSequence = () => {
     const index = locateQuery.data?.index ?? 0;
@@ -124,6 +191,7 @@ export function SequenceBar({
       playhead: index,
       playPath: path,
       playName: name,
+      playVersion: locateQuery.data ? versionOf(locateQuery.data) : "",
     });
   };
 
@@ -143,7 +211,7 @@ export function SequenceBar({
       atEnd
         ? current.start!
         : current.playhead;
-    seekTo(nextHead, true);
+    seekTo(nextHead, true, { restamp: true });
   };
 
   const stepPlayhead = (delta: number) => {
@@ -260,7 +328,9 @@ export function SequenceBar({
         min={sequence.start ?? 0}
         max={sequence.end ?? 0}
         value={sequence.playhead ?? sequence.start ?? 0}
-        onChange={(event) => seekTo(Number(event.target.value), false)}
+        onChange={(event) => seekTo(Number(event.target.value), false, { defer: true })}
+        onPointerUp={flushSeek}
+        onPointerCancel={flushSeek}
         className="h-1 min-w-16 flex-1 accent-cyan-500"
       />
 

@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import type { Layout, LayoutChangedMeta, PanelSize } from "react-resizable-panels";
 import { api } from "./lib/api";
+import { invalidateAfterFsRefresh } from "./lib/refresh";
 import { useHotkeys } from "./hooks/useHotkeys";
 import { useNpzNavigation } from "./hooks/useNpzNavigation";
 import { useAppStore } from "./store/useAppStore";
@@ -146,8 +147,7 @@ export default function App() {
   const refreshCurrentDir = useCallback(() => {
     if (!currentDir) return;
     void api.refresh(currentDir).then(() => {
-      void queryClient.invalidateQueries({ queryKey: ["dirs"] });
-      void queryClient.invalidateQueries({ queryKey: ["npz-list"] });
+      invalidateAfterFsRefresh(queryClient);
     });
   }, [currentDir, queryClient]);
 

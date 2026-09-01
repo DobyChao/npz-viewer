@@ -45,6 +45,8 @@ export interface SequenceState {
   playhead: number | null;
   playPath: string | null;
   playName: string | null;
+  /** mtime_size of playPath; empty until the sibling stamp is known. */
+  playVersion: string;
   playing: boolean;
   fps: number;
 }
@@ -56,6 +58,7 @@ export const DEFAULT_SEQUENCE: SequenceState = {
   playhead: null,
   playPath: null,
   playName: null,
+  playVersion: "",
   playing: false,
   fps: 12,
 };
@@ -120,6 +123,8 @@ interface CompareState {
   clearItems: () => void;
   toggleInsideKey: (key: string) => void;
   setInsideKeys: (keys: string[]) => void;
+  /** Reorder source tiles. Operator operands and overlay source follow identity, not slot. */
+  moveSource: (from: number, to: number) => void;
   setLayout: (layout: CompareLayout) => void;
   setPanel: (panel: ComparePanelState) => void;
   setSplitComparePercent: (percent: number) => void;
@@ -162,6 +167,25 @@ function clampPair(left: number, right: number, sourceCount: number) {
     opLeft: clampOperand(left, sourceCount),
     opRight: clampOperand(right, sourceCount),
   };
+}
+
+function reorderList<T>(list: T[], from: number, to: number): T[] | null {
+  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return null;
+  const next = [...list];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
+
+/** Inside: key only (path follows the file list / playhead). Cross: path::key. */
+function sourceIds(mode: CompareMode, items: CompareItem[], insideKeys: string[]): string[] {
+  return mode === "cross" ? items.map((item) => item.id) : insideKeys.map((key) => `inside::${key}`);
+}
+
+function indexOfId(ids: string[], id: string | undefined, fallback: number): number {
+  if (!id) return fallback;
+  const found = ids.indexOf(id);
+  return found === -1 ? fallback : found;
 }
 
 /** Changing which tiles are on screen invalidates both the A/B cursor and the overlay pairing. */
@@ -259,6 +283,63 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
       ...clampPair(state.opLeft, state.opRight, Math.min(keys.length, MAX_COMPARE_ITEMS)),
       sequence: keys.length === 0 ? clearedSequence(state.sequence.fps) : state.sequence,
     })),
+
+  moveSource: (from, to) =>
+    set((state) => {
+      const oldIds = sourceIds(state.mode, state.items, state.insideKeys);
+      const count = oldIds.length;
+      const leftId = oldIds[state.opLeft];
+      const rightId = oldIds[state.opRight];
+      const overlayOnDerived = Boolean(
+        state.opEnabled && canEnableOp(count) && state.overlaySource >= count,
+      );
+      const overlayId = overlayOnDerived ? undefined : oldIds[state.overlaySource];
+      const toggleOnDerived = Boolean(
+        state.toggleIndex !== null &&
+          state.opEnabled &&
+          canEnableOp(count) &&
+          state.toggleIndex >= count,
+      );
+      const toggleId =
+        state.toggleIndex === null || toggleOnDerived ? undefined : oldIds[state.toggleIndex];
+
+      const items = state.mode === "cross" ? reorderList(state.items, from, to) : null;
+      const insideKeys = state.mode === "inside" ? reorderList(state.insideKeys, from, to) : null;
+      if (state.mode === "cross" && !items) return {};
+      if (state.mode === "inside" && !insideKeys) return {};
+
+      const newIds = sourceIds(state.mode, items ?? state.items, insideKeys ?? state.insideKeys);
+      const n = newIds.length;
+      const opLeft = indexOfId(newIds, leftId, clampOperand(state.opLeft, n));
+      const opRight = indexOfId(newIds, rightId, clampOperand(state.opRight, n));
+
+      let overlaySource = state.overlaySource;
+      if (overlayOnDerived && state.opEnabled && canEnableOp(n)) {
+        overlaySource = n;
+      } else {
+        const found = overlayId ? newIds.indexOf(overlayId) : -1;
+        overlaySource = found <= 0 ? 1 : found;
+      }
+
+      let toggleIndex = state.toggleIndex;
+      if (toggleIndex !== null) {
+        if (toggleOnDerived && state.opEnabled && canEnableOp(n)) {
+          toggleIndex = n;
+        } else if (toggleId) {
+          const found = newIds.indexOf(toggleId);
+          toggleIndex = found === -1 ? 0 : found;
+        }
+      }
+
+      return {
+        ...(items ? { items } : {}),
+        ...(insideKeys ? { insideKeys } : {}),
+        opLeft,
+        opRight,
+        overlaySource,
+        toggleIndex,
+      };
+    }),
   setLayout: (layout) => set({ layout }),
   setPanel: (panel) =>
     set((state) => ({
@@ -327,6 +408,7 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
         playhead: null,
         playPath: null,
         playName: null,
+        playVersion: "",
       },
     })),
   togglePlayback: () =>

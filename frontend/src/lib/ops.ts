@@ -25,3 +25,24 @@ export function formatOpExpr(opId: string, leftIndex: number, rightIndex: number
 export function formatOpKeys(opId: string, leftKey: string, rightKey: string): string {
   return `${leftKey} ${opById(opId).symbol} ${rightKey}`;
 }
+
+function pathTail(path: string): string {
+  const parts = path.replaceAll("\\", "/").split("/").filter(Boolean);
+  return parts.slice(-2).join("/") || path;
+}
+
+/** Dropdown label: slot + key, plus a file hint when keys collide or tiles span files. */
+export function operandOptionLabel(
+  tile: { id: string; key: string; npzName: string; npzPath: string },
+  index: number,
+  tiles: { id: string; key: string; npzName: string; npzPath: string }[],
+): string {
+  const keyClash = tiles.some((other) => other.id !== tile.id && other.key === tile.key);
+  const multiFile = tiles.some((other) => other.npzPath !== tiles[0]?.npzPath);
+  if (!keyClash && !multiFile) return `${index + 1} ${tile.key}`;
+  const nameClash = tiles.some(
+    (other) => other.id !== tile.id && other.key === tile.key && other.npzName === tile.npzName,
+  );
+  const hint = nameClash ? pathTail(tile.npzPath) : tile.npzName;
+  return `${index + 1} ${tile.key} · ${hint}`;
+}
