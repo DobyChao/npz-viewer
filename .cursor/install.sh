@@ -6,6 +6,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# The "remote backend" feature shells out to ssh + rsync from the dev machine.
+if ! command -v rsync >/dev/null 2>&1 || ! command -v ssh >/dev/null 2>&1; then
+  sudo apt-get update -qq
+  sudo apt-get install -y rsync openssh-client
+fi
+
 # The backend's video export streams frames to ffmpeg and then closes stdin
 # before calling subprocess.communicate(). That pattern only works on CPython
 # with the fix from PR #142061, which shipped in Python 3.13/3.14 but NOT in the
