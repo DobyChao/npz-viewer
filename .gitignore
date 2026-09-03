@@ -13,4 +13,5 @@ _verify/
 sample_data/
 stress_data/
 roots.json
+servers.json
 .DS_Store
