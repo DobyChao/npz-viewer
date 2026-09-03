@@ -2,6 +2,7 @@
 // Lets the UI manage remote-backend servers and pick which one serves /api.
 
 export type ServerConnState = "idle" | "connecting" | "active" | "error";
+export type AuthMethod = "agent" | "password" | "key";
 
 export interface HubServer {
   id: string;
@@ -11,9 +12,13 @@ export interface HubServer {
   port: number;
   remoteDir: string;
   remotePort: number;
+  authMethod: AuthMethod;
+  keyPath?: string;
   state: ServerConnState;
   error: string | null;
   active: boolean;
+  reused: boolean;
+  startedByUs: boolean;
   log: string[];
 }
 
@@ -30,6 +35,26 @@ export interface NewServer {
   port: number;
   remoteDir: string;
   remotePort: number;
+  authMethod: AuthMethod;
+  keyPath?: string;
+}
+
+export interface ConnectAuth {
+  authMethod: AuthMethod;
+  password?: string;
+  keyPath?: string;
+  passphrase?: string;
+}
+
+export interface ServerPatch {
+  name?: string;
+  host?: string;
+  user?: string;
+  port?: number;
+  remoteDir?: string;
+  remotePort?: number;
+  authMethod?: AuthMethod;
+  keyPath?: string;
 }
 
 const HUB = "/__hub";
@@ -44,9 +69,9 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-function post<T>(path: string, body?: unknown): Promise<T> {
+function send<T>(path: string, method: string, body?: unknown): Promise<T> {
   return call<T>(path, {
-    method: "POST",
+    method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -54,10 +79,16 @@ function post<T>(path: string, body?: unknown): Promise<T> {
 
 export const hub = {
   state: () => call<HubState>("/state"),
-  add: (server: NewServer) => post<HubState>("/servers", server),
+  add: (server: NewServer) => send<HubState>("/servers", "POST", server),
+  update: (id: string, patch: ServerPatch) =>
+    send<HubState>(`/servers/${encodeURIComponent(id)}`, "PATCH", patch),
   remove: (id: string) =>
     call<HubState>(`/servers/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  connect: (id: string) => post<HubState>(`/servers/${encodeURIComponent(id)}/connect`),
-  disconnect: (id: string) => post<HubState>(`/servers/${encodeURIComponent(id)}/disconnect`),
-  setActive: (target: string) => post<HubState>("/active", { target }),
+  connect: (id: string, auth: ConnectAuth) =>
+    send<HubState>(`/servers/${encodeURIComponent(id)}/connect`, "POST", auth),
+  disconnect: (id: string) =>
+    send<HubState>(`/servers/${encodeURIComponent(id)}/disconnect`, "POST"),
+  restart: (id: string) =>
+    send<HubState>(`/servers/${encodeURIComponent(id)}/restart`, "POST"),
+  setActive: (target: string) => send<HubState>("/active", "POST", { target }),
 };

@@ -6,6 +6,7 @@
 import http from "node:http";
 import type { Connect, Plugin } from "vite";
 import { manager, type Target } from "./manager.ts";
+import type { ConnectAuth } from "./store.ts";
 
 type Req = Connect.IncomingMessage;
 
@@ -22,6 +23,16 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   const payload = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(payload);
+}
+
+function parseAuth(body: Record<string, unknown>): ConnectAuth {
+  const method = body.authMethod;
+  return {
+    authMethod: method === "password" || method === "key" ? method : "agent",
+    password: typeof body.password === "string" ? body.password : undefined,
+    keyPath: typeof body.keyPath === "string" ? body.keyPath : undefined,
+    passphrase: typeof body.passphrase === "string" ? body.passphrase : undefined,
+  };
 }
 
 function proxyApi(req: Req, res: http.ServerResponse, target: Target): void {
@@ -60,7 +71,6 @@ function proxyApi(req: Req, res: http.ServerResponse, target: Target): void {
 }
 
 async function handleHub(req: Req, res: http.ServerResponse): Promise<void> {
-  // req.url is the path after the /__hub mount point, e.g. "/state".
   const url = req.url ?? "/";
   const path = url.split("?")[0];
   const method = req.method ?? "GET";
@@ -84,14 +94,25 @@ async function handleHub(req: Req, res: http.ServerResponse): Promise<void> {
       manager.remove(decodeURIComponent(removeMatch[1]));
       return sendJson(res, 200, manager.state());
     }
+    if (method === "PATCH" && removeMatch) {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      manager.update(decodeURIComponent(removeMatch[1]), body);
+      return sendJson(res, 200, manager.state());
+    }
     const connectMatch = path.match(/^\/servers\/([^/]+)\/connect$/);
     if (method === "POST" && connectMatch) {
-      await manager.connect(decodeURIComponent(connectMatch[1]));
+      const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+      await manager.connect(decodeURIComponent(connectMatch[1]), parseAuth(body));
       return sendJson(res, 200, manager.state());
     }
     const disconnectMatch = path.match(/^\/servers\/([^/]+)\/disconnect$/);
     if (method === "POST" && disconnectMatch) {
       await manager.disconnect(decodeURIComponent(disconnectMatch[1]));
+      return sendJson(res, 200, manager.state());
+    }
+    const restartMatch = path.match(/^\/servers\/([^/]+)\/restart$/);
+    if (method === "POST" && restartMatch) {
+      await manager.restart(decodeURIComponent(restartMatch[1]));
       return sendJson(res, 200, manager.state());
     }
     sendJson(res, 404, { error: "not found" });
