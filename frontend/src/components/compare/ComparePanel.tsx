@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
+  ArrowLeftRight,
   ArrowUpDown,
   ChevronDown,
   ChevronLeft,
@@ -12,20 +13,24 @@ import {
   Ratio,
   Repeat,
   Scan,
+  Sigma,
   X,
 } from "lucide-react";
-import { api } from "../../lib/api";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { api, versionOf } from "../../lib/api";
 import { formatNumber, formatPercent } from "../../lib/format";
 import { isTypingTarget } from "../../hooks/useHotkeys";
 import { useCurrentNpz } from "../../hooks/useCurrentNpz";
 import { useNpzNavigation } from "../../hooks/useNpzNavigation";
 import { useAppStore } from "../../store/useAppStore";
-import { useCompareStore } from "../../store/useCompareStore";
+import { canEnableOp, clampOperand, useCompareStore } from "../../store/useCompareStore";
+import type { CompareLayout, VideoExportKey } from "../../lib/types";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
-import type { CompareLayout } from "../../lib/types";
+import { BINARY_OPS, formatOpExpr, formatOpKeys, operandOptionLabel, opById } from "../../lib/ops";
 import { Button, EmptyState, IconButton, SectionHeader, Select } from "../ui";
 import { CompareTile } from "./CompareTile";
 import type { TileSpec } from "./CompareTile";
+import { SequenceBar } from "./SequenceBar";
 
 const PIXEL_THROTTLE_MS = 120;
 
@@ -78,6 +83,16 @@ export function ComparePanel() {
   const lightbox = useAppStore((state) => state.lightbox);
   const equalHeight = useCompareStore((state) => state.equalHeight);
   const setEqualHeight = useCompareStore((state) => state.setEqualHeight);
+  const opEnabled = useCompareStore((state) => state.opEnabled);
+  const opId = useCompareStore((state) => state.opId);
+  const opLeft = useCompareStore((state) => state.opLeft);
+  const opRight = useCompareStore((state) => state.opRight);
+  const toggleOp = useCompareStore((state) => state.toggleOp);
+  const setOpId = useCompareStore((state) => state.setOpId);
+  const setOpLeft = useCompareStore((state) => state.setOpLeft);
+  const setOpRight = useCompareStore((state) => state.setOpRight);
+  const swapOpOperands = useCompareStore((state) => state.swapOpOperands);
+  const moveSource = useCompareStore((state) => state.moveSource);
   const setOverlayEnabled = useCompareStore((state) => state.setOverlayEnabled);
   const setOverlaySource = useCompareStore((state) => state.setOverlaySource);
   const setOverlayPeek = useCompareStore((state) => state.setOverlayPeek);
@@ -90,6 +105,30 @@ export function ComparePanel() {
   const removeItem = useCompareStore((state) => state.removeItem);
   const toggleInsideKey = useCompareStore((state) => state.toggleInsideKey);
   const showPixelReadout = useCompareStore((state) => state.showPixelReadout);
+  const sequence = useCompareStore((state) => state.sequence);
+  const gamut = useAppStore((state) => state.gamut);
+
+  const sequenceDriving =
+    mode === "inside" && sequence.engaged && sequence.playhead !== null && Boolean(sequence.playPath);
+  const tilePath = sequenceDriving ? sequence.playPath : path;
+  const { data: playMeta } = useQuery({
+    queryKey: ["npz-meta", tilePath],
+    queryFn: () => api.meta(tilePath!),
+    enabled: Boolean(tilePath) && mode === "inside" && !sequence.playing,
+    placeholderData: keepPreviousData,
+    staleTime: 0,
+  });
+  const tileMeta = playMeta ?? meta;
+  // Sequence used to omit v= so prefetch URLs matched the tiles; that made
+  // HTTP + imageCache keep a rewritten npz forever. Stamp comes from nav/at.
+  const tileVersion = sequenceDriving
+    ? sequence.playVersion || (tileMeta && tileMeta.path === tilePath ? versionOf(tileMeta) : "")
+    : tileMeta
+      ? versionOf(tileMeta)
+      : version;
+  const tileName = sequenceDriving
+    ? (sequence.playName ?? tileMeta?.name ?? meta?.name ?? "")
+    : (tileMeta?.name ?? meta?.name ?? "");
 
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [naturalSizes, setNaturalSizes] = useState<Record<string, ImageSize>>({});
@@ -113,30 +152,61 @@ export function ComparePanel() {
         removable: true,
       }));
     }
-    if (!path || !meta) return [];
+    if (!path || !tileMeta) return [];
     return insideKeys.map((key) => {
-      const keyMeta = meta.keys.find((candidate) => candidate.name === key);
+      const keyMeta = tileMeta.keys.find((candidate) => candidate.name === key);
       return {
-        id: `${path}::${key}`,
+        id: `inside::${key}`,
         key,
-        npzPath: path,
-        npzName: meta.name,
-        version,
+        npzPath: tilePath ?? path,
+        npzName: tileName,
+        version: tileVersion,
         options: DEFAULT_VIEW_OPTIONS,
-        missing: !keyMeta?.renderable,
+        missing: tilePath != null && tileMeta.path === tilePath ? !keyMeta?.renderable : false,
         removable: true,
       };
     });
-  }, [mode, items, insideKeys, path, meta, version]);
+  }, [mode, items, insideKeys, path, meta, version, tileMeta, tilePath, tileName, tileVersion]);
 
-  const signature = tiles.map((tile) => tile.id).join("|");
-  const visibleTiles = toggleIndex !== null && tiles.length > 0 ? [tiles[toggleIndex % tiles.length]] : tiles;
+  const opAllowed = canEnableOp(tiles.length);
+  const leftIndex = clampOperand(opLeft, tiles.length);
+  const rightIndex = clampOperand(opRight, tiles.length);
+  const displayTiles = useMemo<TileSpec[]>(() => {
+    if (!opEnabled || !opAllowed) return tiles;
+    const left = tiles[leftIndex];
+    const right = tiles[rightIndex];
+    if (!left || !right) return tiles;
+    return [
+      ...tiles,
+      {
+        id: `op::${opId}::${left.id}::${right.id}`,
+        key: formatOpKeys(opId, left.key, right.key),
+        npzPath: left.npzPath,
+        npzName: left.npzPath === right.npzPath ? left.npzName : `${left.npzName} / ${right.npzName}`,
+        version: `${left.version}|${right.version}`,
+        options: DEFAULT_VIEW_OPTIONS,
+        missing: left.missing || right.missing,
+        removable: true,
+        derived: { op: opId, left, right },
+      },
+    ];
+  }, [tiles, opEnabled, opAllowed, opId, leftIndex, rightIndex]);
+
+  const signature = displayTiles.map((tile) => tile.id).join("|");
+  const visibleTiles =
+    toggleIndex !== null && displayTiles.length > 0
+      ? [displayTiles[toggleIndex % displayTiles.length]]
+      : displayTiles;
   const effectiveLayout = resolveLayout(layout, visibleTiles.length);
 
   // Overlay is available whenever two tiles sit side by side. Hold X to overlay
   // (default); click the button to lock it on, then hold X to peek underneath.
+  // The layer is always painted on tile 1; the source can be any later tile, including the op tile.
   const overlayAvailable = tiles.length >= 2 && toggleIndex === null && panel !== "hidden";
-  const overlaySourceIndex = overlayAvailable ? Math.min(overlaySource, tiles.length - 1) : null;
+  const overlaySourceIndex = overlayAvailable
+    ? Math.min(Math.max(1, overlaySource), displayTiles.length - 1)
+    : null;
+  const overlaySpec = overlaySourceIndex !== null ? displayTiles[overlaySourceIndex] : undefined;
   const overlayVisible = overlayAvailable && overlayEnabled !== overlayPeek;
 
   // The first visible tile is the baseline: fitting, 1:1 and equal-height all key off it.
@@ -227,12 +297,12 @@ export function ComparePanel() {
   useEffect(() => {
     if (signature === seenSignatureRef.current) return;
     seenSignatureRef.current = signature;
-    const live = new Set(tiles.map((tile) => tile.id));
+    const live = new Set(displayTiles.map((tile) => tile.id));
     setNaturalSizes((previous) => {
       const kept = Object.entries(previous).filter(([id]) => live.has(id));
       return kept.length === Object.keys(previous).length ? previous : Object.fromEntries(kept);
     });
-  }, [signature, tiles]);
+  }, [signature, displayTiles]);
 
   // Refit on a change of the reference image's dimensions only. Stepping through files
   // of the same resolution is the main comparison workflow and has to preserve the zoom.
@@ -275,8 +345,24 @@ export function ComparePanel() {
       const now = performance.now();
       if (now - lastPixelFetch.current < PIXEL_THROTTLE_MS) return;
       lastPixelFetch.current = now;
-      void api
-        .pixel(spec.npzPath, spec.key, x, y, spec.options.batch)
+      const request = spec.derived
+        ? api.opPixel({
+            op: spec.derived.op,
+            left: {
+              path: spec.derived.left.npzPath,
+              key: spec.derived.left.key,
+              options: spec.derived.left.options,
+            },
+            right: {
+              path: spec.derived.right.npzPath,
+              key: spec.derived.right.key,
+              options: spec.derived.right.options,
+            },
+            x,
+            y,
+          })
+        : api.pixel(spec.npzPath, spec.key, x, y, spec.options.batch);
+      void request
         .then((result) => setReadout({ x, y, values: result.values }))
         .catch(() => setReadout(null));
     },
@@ -284,6 +370,10 @@ export function ComparePanel() {
   );
 
   const removeTile = (tile: TileSpec) => {
+    if (tile.derived) {
+      toggleOp();
+      return;
+    }
     if (mode === "cross") removeItem(tile.id);
     else toggleInsideKey(tile.key);
   };
@@ -376,6 +466,65 @@ export function ComparePanel() {
           </Button>
 
           <Button
+            title={
+              tiles.length >= 4
+                ? "已有 4 张源图，无法再加算子格"
+                : tiles.length < 2
+                  ? "至少两张图才能套算子"
+                  : opEnabled
+                    ? `关掉临时算子格（G）· 当前 ${formatOpExpr(opId, leftIndex, rightIndex)}`
+                    : "对两张源图套算子，临时生成一格（G）"
+            }
+            data-testid="op-toggle"
+            active={opEnabled && opAllowed}
+            disabled={!opAllowed}
+            onClick={() => toggleOp()}
+          >
+            <Sigma size={13} /> 算子
+          </Button>
+          {opEnabled && opAllowed && (
+            <>
+              <Select
+                title="算子"
+                data-testid="op-kind"
+                value={opId}
+                options={BINARY_OPS.map((item) => ({
+                  value: item.id,
+                  label: `${item.symbol} ${item.label}`,
+                }))}
+                onChange={setOpId}
+              />
+              <Select
+                title="左操作数"
+                data-testid="op-left"
+                value={String(leftIndex)}
+                options={tiles.map((tile, index) => ({
+                  value: String(index),
+                  label: operandOptionLabel(tile, index, tiles),
+                }))}
+                onChange={(value) => setOpLeft(Number(value))}
+              />
+              <Select
+                title="右操作数"
+                data-testid="op-right"
+                value={String(rightIndex)}
+                options={tiles.map((tile, index) => ({
+                  value: String(index),
+                  label: operandOptionLabel(tile, index, tiles),
+                }))}
+                onChange={(value) => setOpRight(Number(value))}
+              />
+              <IconButton
+                title="互换左右操作数"
+                data-testid="op-swap"
+                onClick={() => swapOpOperands()}
+              >
+                <ArrowLeftRight size={13} />
+              </IconButton>
+            </>
+          )}
+
+          <Button
             title="等高：把各图等比缩放到与第 1 格相同的显示高度，尺寸不同时才有意义"
             data-testid="equal-height-toggle"
             active={equalHeight}
@@ -419,7 +568,9 @@ export function ComparePanel() {
           data-testid="compare-grid"
           className={clsx("grid min-h-0 flex-1 gap-px bg-zinc-800", gridClassFor(effectiveLayout))}
         >
-          {visibleTiles.map((tile, index) => (
+          {visibleTiles.map((tile, index) => {
+            const sourceIndex = tiles.findIndex((item) => item.id === tile.id);
+            return (
             <CompareTile
               key={tile.id}
               spec={tile}
@@ -427,12 +578,12 @@ export function ComparePanel() {
               viewport={viewport}
               scaleFactor={heightFactor(tile.id)}
               overlay={
-                overlaySourceIndex !== null && index === 0
+                overlaySpec && overlaySourceIndex !== null && index === 0
                   ? {
-                      spec: tiles[overlaySourceIndex],
+                      spec: overlaySpec,
                       index: overlaySourceIndex,
                       hidden: !overlayVisible,
-                      scaleFactor: heightFactor(tiles[overlaySourceIndex].id),
+                      scaleFactor: heightFactor(overlaySpec.id),
                     }
                   : undefined
               }
@@ -449,9 +600,75 @@ export function ComparePanel() {
               onNaturalSize={handleNaturalSize}
               onHoverPixel={handleHoverPixel}
               onRemove={tile.removable ? () => removeTile(tile) : undefined}
+              onMoveEarlier={
+                toggleIndex === null && sourceIndex > 0
+                  ? () => moveSource(sourceIndex, sourceIndex - 1)
+                  : undefined
+              }
+              onMoveLater={
+                toggleIndex === null && sourceIndex >= 0 && sourceIndex < tiles.length - 1
+                  ? () => moveSource(sourceIndex, sourceIndex + 1)
+                  : undefined
+              }
             />
-          ))}
+            );
+          })}
         </div>
+      )}
+
+      {mode === "inside" && path && insideKeys.length > 0 && (
+        <SequenceBar
+          path={path}
+          keys={insideKeys}
+          gamut={gamut}
+          layout={layout}
+          equalHeight={equalHeight}
+          viewport={viewport}
+          measureTile={() => {
+            const tile = gridRef.current?.firstElementChild as HTMLElement | null;
+            return { width: tile?.clientWidth ?? 0, height: tile?.clientHeight ?? 0 };
+          }}
+          naturalSizes={displayTiles.map(
+            (tile) => naturalSizes[tile.id] ?? { width: 0, height: 0 },
+          )}
+          op={
+            opEnabled && opAllowed && tiles.length >= 2
+              ? {
+                  id: opId,
+                  left: tiles[leftIndex]?.key ?? "",
+                  right: tiles[rightIndex]?.key ?? "",
+                }
+              : null
+          }
+          exportCells={displayTiles.map((tile): VideoExportKey =>
+            tile.derived
+              ? {
+                  type: "op",
+                  op: tile.derived.op,
+                  key: tile.key,
+                  key_a: tile.derived.left.key,
+                  key_b: tile.derived.right.key,
+                  batch: DEFAULT_VIEW_OPTIONS.batch,
+                  layout: "auto",
+                  channel: DEFAULT_VIEW_OPTIONS.channel,
+                  normalize: DEFAULT_VIEW_OPTIONS.normalize,
+                  colormap: DEFAULT_VIEW_OPTIONS.colormap,
+                  alpha: DEFAULT_VIEW_OPTIONS.alpha,
+                  gainmap_gamut: DEFAULT_VIEW_OPTIONS.gainmapGamut,
+                }
+              : {
+                  type: "key",
+                  key: tile.key,
+                  batch: tile.options.batch,
+                  layout: tile.options.layout ?? "auto",
+                  channel: tile.options.channel,
+                  normalize: tile.options.normalize,
+                  colormap: tile.options.colormap,
+                  alpha: tile.options.alpha,
+                  gainmap_gamut: tile.options.gainmapGamut,
+                },
+          )}
+        />
       )}
 
       <div className="flex h-6 shrink-0 items-center gap-4 border-t border-zinc-800 bg-zinc-900/60 px-3 font-mono text-[10px] text-zinc-500 tabular-nums">
@@ -459,9 +676,9 @@ export function ComparePanel() {
           <button
             type="button"
             className="text-cyan-400"
-            onClick={() => advanceToggle(tiles.length)}
+            onClick={() => advanceToggle(displayTiles.length)}
           >
-            A/B {toggleIndex + 1} / {tiles.length} · 空格切换
+            A/B {toggleIndex + 1} / {displayTiles.length} · 空格切换
           </button>
         )}
         {overlaySourceIndex !== null && (
@@ -473,6 +690,11 @@ export function ComparePanel() {
               : overlayVisible
                 ? `覆盖 ${overlaySourceIndex + 1} → 1 · 松开 X 移开`
                 : `按住 X 覆盖 ${overlaySourceIndex + 1} → 1`}
+          </span>
+        )}
+        {opEnabled && opAllowed && (
+          <span data-testid="op-status" className="text-amber-400">
+            {opById(opId).label} {formatOpExpr(opId, leftIndex, rightIndex)}
           </span>
         )}
         {equalHeight && referenceSize && (

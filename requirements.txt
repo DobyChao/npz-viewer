@@ -5,3 +5,4 @@ pillow==12.3.0
 pydantic==2.13.4
 pydantic-settings==2.15.0
 orjson==3.11.9
+imageio-ffmpeg==0.6.0

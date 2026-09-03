@@ -11,6 +11,8 @@ import type {
   SiblingResult,
   SortField,
   SortOrder,
+  VideoExportRequest,
+  VideoJobInfo,
   ViewOptions,
 } from "./types";
 
@@ -80,6 +82,22 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
   );
 }
 
+export interface OpOperand {
+  path: string;
+  key: string;
+  version?: string;
+  options?: Partial<ViewOptions>;
+}
+
+function operandQuery(suffix: "a" | "b", options?: Partial<ViewOptions>): Params {
+  const params: Params = {};
+  if (!options) return params;
+  if (options.layout) params[`layout_${suffix}`] = options.layout;
+  if (options.batch) params[`batch_${suffix}`] = options.batch;
+  if (options.channel) params[`channel_${suffix}`] = options.channel;
+  return params;
+}
+
 export const api = {
   settings: () => request<ServerSettings>("/settings"),
   roots: () => request<{ roots: RootInfo[] }>("/roots"),
@@ -106,15 +124,54 @@ export const api = {
     request<ArrayStats>("/npz/stats", { path, key, batch }),
   pixel: (path: string, key: string, x: number, y: number, batch = 0) =>
     request<PixelValue>("/npz/pixel", { path, key, x, y, batch }),
+  opPixel: (args: {
+    op: string;
+    left: OpOperand;
+    right: OpOperand;
+    x: number;
+    y: number;
+  }) =>
+    request<PixelValue>("/npz/op/pixel", {
+      op: args.op,
+      path_a: args.left.path,
+      key_a: args.left.key,
+      path_b: args.right.path,
+      key_b: args.right.key,
+      x: args.x,
+      y: args.y,
+      ...operandQuery("a", args.left.options),
+      ...operandQuery("b", args.right.options),
+    }),
 
   sibling: (path: string, scope: "file" | "folder", direction: "next" | "prev") =>
     request<SiblingResult>("/nav/sibling", { path, scope, direction }),
   locate: (path: string) => request<SiblingResult>("/nav/locate", { path }),
+  navAt: (path: string, index: number) => request<SiblingResult>("/nav/at", { path, index }),
+
+  startVideoExport: (body: VideoExportRequest) => postJson<VideoJobInfo>("/video/export", body),
+  videoJob: (id: string) => request<VideoJobInfo>(`/video/jobs/${encodeURIComponent(id)}`),
+  cancelVideoJob: (id: string) =>
+    request<VideoJobInfo>(`/video/jobs/${encodeURIComponent(id)}/cancel`, {}, { method: "POST" }),
+  videoFileUrl: (id: string) => `${BASE}/video/jobs/${encodeURIComponent(id)}/file`,
 };
 
 /** Cache buster: render URLs are immutable, so they must change when the file does. */
 export function versionOf(file: { mtime: number; size: number }): string {
   return `${Math.round(file.mtime * 1000)}_${file.size}`;
+}
+
+/** Bumped on explicit refresh so same-second rewrites still drop HTTP / memory cache. */
+let renderEpoch = 0;
+
+export function bumpRenderEpoch(): void {
+  renderEpoch += 1;
+}
+
+function versionParam(version?: string): string | undefined {
+  if (version && renderEpoch) return `${version}.e${renderEpoch}`;
+  if (version) return version;
+  if (renderEpoch) return `e${renderEpoch}`;
+  return undefined;
 }
 
 export interface RenderRequest {
@@ -140,7 +197,7 @@ export function renderUrl({
     path,
     key,
     gamut: options?.gamut ?? gamut,
-    v: version,
+    v: versionParam(version),
   };
   if (options?.layout) params.layout = options.layout;
   if (options?.batch) params.batch = options.batch;
@@ -166,6 +223,39 @@ export function thumbUrl(args: {
     prefer: args.prefer,
     size: args.size ?? 192,
     gamut: args.gamut,
-    v: args.version,
+    v: versionParam(args.version),
   })}`;
+}
+
+/** Folded into `v=` so immutable browser cache drops old op PNGs after rule changes. */
+const OP_RENDER_CACHE = "1";
+
+export function opRenderUrl(args: {
+  op: string;
+  left: OpOperand;
+  right: OpOperand;
+  gamut: Gamut;
+  version?: string;
+  maxSize?: number;
+  format?: "png" | "webp";
+}): string {
+  const params: Params = {
+    op: args.op,
+    path_a: args.left.path,
+    key_a: args.left.key,
+    path_b: args.right.path,
+    key_b: args.right.key,
+    gamut: args.left.options?.gamut ?? args.right.options?.gamut ?? args.gamut,
+    v: versionParam(
+      `${args.version ?? [args.left.version, args.right.version].filter(Boolean).join("|")}|o${OP_RENDER_CACHE}`,
+    ),
+    ...operandQuery("a", args.left.options),
+    ...operandQuery("b", args.right.options),
+  };
+  const colormap = args.left.options?.colormap ?? args.right.options?.colormap;
+  if (colormap && colormap !== "none") params.colormap = colormap;
+  if (args.left.options?.gainmapGamut || args.right.options?.gainmapGamut) params.gainmap_gamut = true;
+  if (args.maxSize) params.max_size = args.maxSize;
+  if (args.format) params.format = args.format;
+  return `${BASE}/npz/op/render${toQuery(params)}`;
 }

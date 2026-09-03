@@ -22,7 +22,7 @@ from ..models import (
     SortOrder,
 )
 from ..paths import to_posix
-from ..services import npzio, render
+from ..services import npzio, ops, render
 from ..services.dirindex import dir_index, filter_entries, paginate
 from .deps import image_response, resolve_dir, resolve_file
 
@@ -172,3 +172,189 @@ async def npz_pixel(
 ) -> PixelValue:
     target = resolve_file(path)
     return await asyncio.to_thread(render.pixel_value, target, key, x, y, batch)
+
+
+def _operand(
+    key: str, batch: int, layout: Layout | None, channel: int
+) -> ops.OperandParams:
+    return ops.OperandParams(key=key, batch=batch, layout=layout or "auto", channel=channel)
+
+
+def _op_params(
+    op: str,
+    key_a: str,
+    key_b: str,
+    gamut: Gamut,
+    batch_a: int,
+    batch_b: int,
+    layout_a: Layout | None,
+    layout_b: Layout | None,
+    channel_a: int,
+    channel_b: int,
+    colormap: Colormap,
+    gainmap_gamut: bool,
+    max_size: int,
+    fmt: ImageFormat,
+) -> ops.OpParams:
+    return ops.OpParams(
+        op=op,
+        left=_operand(key_a, batch_a, layout_a, channel_a),
+        right=_operand(key_b, batch_b, layout_b, channel_b),
+        gamut=gamut,
+        colormap=colormap,
+        gainmap_gamut=gainmap_gamut,
+        max_size=max_size,
+        fmt=fmt,
+    )
+
+
+@router.get("/ops")
+def list_ops() -> dict[str, list[dict[str, str]]]:
+    return {"ops": [operator.public() for operator in ops.OPERATORS.values()]}
+
+
+@router.get("/op/render")
+async def op_render(
+    request: Request,
+    op: str = Query("div", description="二元算子 id，见 GET /ops"),
+    path_a: str = Query(..., description="左操作数所在 npz"),
+    key_a: str = Query(...),
+    path_b: str | None = Query(None, description="右操作数所在 npz；缺省与 path_a 相同"),
+    key_b: str = Query(...),
+    gamut: Gamut = "bt2020",
+    batch_a: int = Query(0, ge=0),
+    batch_b: int = Query(0, ge=0),
+    layout_a: Layout | None = Query(None),
+    layout_b: Layout | None = Query(None),
+    channel_a: int = Query(0, ge=0),
+    channel_b: int = Query(0, ge=0),
+    colormap: Colormap = "none",
+    gainmap_gamut: bool = False,
+    max_size: int = Query(0, ge=0, le=16384),
+    fmt: ImageFormat = Query("png", alias="format"),
+    v: str = Query("", description="缓存击穿用的版本串，服务端忽略"),
+) -> Response:
+    path_left = resolve_file(path_a)
+    path_right = resolve_file(path_b) if path_b else path_left
+    params = _op_params(
+        op,
+        key_a,
+        key_b,
+        gamut,
+        batch_a,
+        batch_b,
+        layout_a,
+        layout_b,
+        channel_a,
+        channel_b,
+        colormap,
+        gainmap_gamut,
+        max_size,
+        fmt,
+    )
+    data, mime, etag = await asyncio.to_thread(ops.render_op, path_left, path_right, params)
+    return image_response(request, data, mime, etag)
+
+
+@router.get("/op/pixel", response_model=PixelValue)
+async def op_pixel_endpoint(
+    op: str = Query("div"),
+    path_a: str = Query(...),
+    key_a: str = Query(...),
+    path_b: str | None = Query(None),
+    key_b: str = Query(...),
+    x: int = Query(..., ge=0),
+    y: int = Query(..., ge=0),
+    batch_a: int = Query(0, ge=0),
+    batch_b: int = Query(0, ge=0),
+    layout_a: Layout | None = Query(None),
+    layout_b: Layout | None = Query(None),
+    channel_a: int = Query(0, ge=0),
+    channel_b: int = Query(0, ge=0),
+) -> PixelValue:
+    path_left = resolve_file(path_a)
+    path_right = resolve_file(path_b) if path_b else path_left
+    return await asyncio.to_thread(
+        ops.op_pixel,
+        path_left,
+        _operand(key_a, batch_a, layout_a, channel_a),
+        path_right,
+        _operand(key_b, batch_b, layout_b, channel_b),
+        op,
+        x,
+        y,
+    )
+
+
+@router.get("/ratio/render")
+async def ratio_render(
+    request: Request,
+    path_a: str = Query(..., description="分子（numerator）所在 npz"),
+    key_a: str = Query(...),
+    path_b: str | None = Query(None, description="分母所在 npz；缺省与 path_a 相同"),
+    key_b: str = Query(...),
+    gamut: Gamut = "bt2020",
+    batch_a: int = Query(0, ge=0),
+    batch_b: int = Query(0, ge=0),
+    layout_a: Layout | None = Query(None),
+    layout_b: Layout | None = Query(None),
+    channel_a: int = Query(0, ge=0),
+    channel_b: int = Query(0, ge=0),
+    colormap: Colormap = "none",
+    gainmap_gamut: bool = False,
+    max_size: int = Query(0, ge=0, le=16384),
+    fmt: ImageFormat = Query("png", alias="format"),
+    v: str = Query("", description="缓存击穿用的版本串，服务端忽略"),
+) -> Response:
+    return await op_render(
+        request,
+        op="div",
+        path_a=path_a,
+        key_a=key_a,
+        path_b=path_b,
+        key_b=key_b,
+        gamut=gamut,
+        batch_a=batch_a,
+        batch_b=batch_b,
+        layout_a=layout_a,
+        layout_b=layout_b,
+        channel_a=channel_a,
+        channel_b=channel_b,
+        colormap=colormap,
+        gainmap_gamut=gainmap_gamut,
+        max_size=max_size,
+        fmt=fmt,
+        v=v,
+    )
+
+
+@router.get("/ratio/pixel", response_model=PixelValue)
+async def ratio_pixel_endpoint(
+    path_a: str = Query(...),
+    key_a: str = Query(...),
+    path_b: str | None = Query(None),
+    key_b: str = Query(...),
+    x: int = Query(..., ge=0),
+    y: int = Query(..., ge=0),
+    batch_a: int = Query(0, ge=0),
+    batch_b: int = Query(0, ge=0),
+    layout_a: Layout | None = Query(None),
+    layout_b: Layout | None = Query(None),
+    channel_a: int = Query(0, ge=0),
+    channel_b: int = Query(0, ge=0),
+) -> PixelValue:
+    return await op_pixel_endpoint(
+        op="div",
+        path_a=path_a,
+        key_a=key_a,
+        path_b=path_b,
+        key_b=key_b,
+        x=x,
+        y=y,
+        batch_a=batch_a,
+        batch_b=batch_b,
+        layout_a=layout_a,
+        layout_b=layout_b,
+        channel_a=channel_a,
+        channel_b=channel_b,
+    )

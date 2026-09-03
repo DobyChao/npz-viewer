@@ -209,7 +209,18 @@ backend/
 | GET | `/api/npz/render` | 见下 | `image/png` 或 `image/webp` |
 | GET | `/api/npz/thumb` | `path,key=,size=192,v=` | `image/webp` |
 | GET | `/api/npz/pixel` | `path,key,x,y,batch=` | `{values:[...]}`（对比视图取值读数用） |
-| GET | `/api/nav/sibling` | `path, scope=file\|folder, direction=next\|prev` | `{path}` 或 404 |
+| GET | `/api/npz/ops` | — | `{ops:[{id,symbol,label,display}]}` 已注册二元算子 |
+| GET | `/api/npz/op/render` | 见下 | 两图套算子后输出 PNG/WebP |
+| GET | `/api/npz/op/pixel` | 对齐后坐标系的 `x,y` + 两套 operand + `op` | `{values:[...]}`，**clip 前**的原始结果 |
+| GET | `/api/npz/ratio/render` | — | `/op/render?op=div` 的别名 |
+| GET | `/api/npz/ratio/pixel` | — | `/op/pixel?op=div` 的别名 |
+| GET | `/api/nav/sibling` | `path, scope=file\|folder, direction=next\|prev` | `{path,name,index,total,mtime,size}` 或 404 |
+| GET | `/api/nav/locate` | `path` | `{path,name,index,total,mtime,size}` |
+| GET | `/api/nav/at` | `path, index` | 该目录自然序第 `index` 个 npz（0 起）；越界 400；`mtime/size` 来自对该文件的 live stat |
+| POST | `/api/video/export` | 见 §6.6 | `{id,status,current,total}` |
+| GET | `/api/video/jobs/{id}` | — | `{id,status,current,total,error,filename,saved_path}` |
+| POST | `/api/video/jobs/{id}/cancel` | — | 更新后的 job |
+| GET | `/api/video/jobs/{id}/file` | — | `video/mp4` 下载；未完成 404 |
 
 `KeyMeta`：
 ```ts
@@ -246,7 +257,20 @@ format    png | webp           默认 png
 v         缓存击穿用的版本串（前端传 `${mtime}_${size}`），后端忽略其值
 ```
 
-响应头必须带 `ETag`（= 缓存 key 的 hash）和 `Cache-Control: public, max-age=31536000, immutable`，并正确处理 `If-None-Match` 返回 304。
+`/api/npz/op/render`：`op` 为算子 id（`GET /ops` 列出）；`path_a,key_a` 为左操作数，`path_b,key_b` 为右操作数（`path_b` 缺省= `path_a`）。另有 `batch_a/b`、`layout_a/b`、`channel_a/b`，以及共用的 `gamut`、`colormap`、`gainmap_gamut`、`max_size`、`format`、`v`。后端在线性 float 上对齐后套算子：`H×W` 不同时把像素数较小的那张 bilinear 放到较大的尺寸；一彩一灰则把灰 broadcast 成 3 通道。
+
+当前算子：
+
+- `div`（除法）：`left / right`；`|right| < 1e-6` 时用同号 `1e-6` 保护，两边都接近 0 则记为 1。结果走 gainmap 管线（`clip(0,2)/2`）。
+- `mul`（乘法）：`left * right`。结果走普通线性 RGB（`clip(0,1)` + gamma）。
+
+新增算子：后端 `ops.OPERATORS` 注册 `id/symbol/label/display/apply`，前端 `lib/ops.ts` 的 `BINARY_OPS` 同步同一 id。
+
+`/api/npz/ratio/*` 仍可用，等价于 `op=div`。
+
+带 `v=` 的响应头必须是 `Cache-Control: public, max-age=31536000, immutable` 和 `ETag`（= 缓存 key 的 hash），并正确处理 `If-None-Match` 返回 304。没有 `v=` 时改为 `private, max-age=0, must-revalidate`（序列播放漏传版本时不能把改写后的 npz 锁进浏览器缓存）。
+
+文件内序列播放的 render URL **必须**带当前帧的 `v=`（来自 `/nav/at` 对该文件的 live stat，而不是 dirindex 快照）。前端 `imageCache` 以完整 URL 为键；刷新目录会 bump render epoch 并清空 navCache。
 
 **错误约定**：统一 `{"detail": {"code": "...", "message": "...", "hint": "..."}}`，HTTP 状态用 400/403/404/415/500。`code` 至少包含 `PATH_OUTSIDE_ROOT`、`FILE_NOT_FOUND`、`KEY_NOT_FOUND`、`UNSUPPORTED_KIND`、`NEEDS_PICKLE`、`BAD_PARAM`。
 
@@ -360,12 +384,15 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 
 **ComparePanel（FastStone 式，最关键的交互）**
 - 1~4 个 tile 按 `layout` 网格排布，**共享同一个 viewport transform**：任一 tile 内滚轮缩放（以光标位置为锚点）或拖拽平移，其余 tile 同步。
-- 工具栏：缩放百分比读数、`适应窗口` / `100%` 按钮、布局切换、A/B toggle 开关、面板三态切换（隐藏 / 分栏 / 占满）、关闭按钮。
-- A/B toggle：开启后只显示一个 tile，按 `空格` 在已选项之间循环切换，用于像素级闪烁对比。切换时**不重置 viewport**。
-- 每个 tile 左上角显示标签 `npz文件名 / key`，右上角有单独移除按钮。
+- 工具栏：缩放百分比读数、`适应窗口` / `100%` 按钮、布局切换、A/B toggle 开关、覆盖、**算子**、面板三态切换（隐藏 / 分栏 / 占满）、关闭按钮。
+- A/B toggle：开启后只显示一个 tile，按 `空格` 在已选项之间循环切换（含算子格），用于像素级闪烁对比。切换时**不重置 viewport**。
+- **临时算子**：至少 2 张、不满 4 张源瓦片时可开。可选手册里的算子（默认除法）以及对比列表中任意两格。默认 **第 2 格 ÷ 第 1 格**（与覆盖 `2 → 1` 同一对）。结果追加一格虚拟瓦片，不写回 npz。点该格移除只关算子。源瓦片满 4 张时按钮禁用。覆盖始终叠到第 1 格；覆盖源可以是第 1 格以外的任意格（含算子格）。除法按 gainmap 展示，乘法按线性 RGB 展示。
+- 源瓦片可前移/后移（算子格始终在最后）。重排后算子操作数和覆盖源按身份跟随原图：文件内用 key，跨文件用 `(npz路径, key)`。若覆盖源被排到第 1 格，改选第 2 格。操作数下拉在 key 冲突或多文件时带上文件名（文件名也冲突则带上末两级路径）。
+- 每个 tile 左上角显示标签 `npz文件名 / key`，右上角有前移/后移（仅源格）和移除按钮。
 - 顶部导航：`◀ 上一个 npz / 下一个 npz ▶`（同目录内）、`◀ 上级文件夹 / 下级 ▶`（兄弟文件夹里相同序号的 npz）。
 - **文件内模式跨文件跟随**：切到新 npz 后，用相同的 key 名重新构造 tile；如果新 npz 里没有这个 key，该位置渲染 `NotFoundTile` 占位（灰底 + `KEY NOT FOUND: <key>`），**不要塌陷布局**。
 - 鼠标悬停时在工具栏显示当前像素坐标和原始数值（调 `/api/npz/pixel`，节流 100ms）。
+- **序列栏（仅文件内对比）**：底部起止帧、播放、scrubber、导出。跨文件模式隐藏。详见 §6.6。
 
 ### 6.5 快捷键
 
@@ -374,6 +401,8 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 | `←` / `→` | 同目录上一个 / 下一个 npz |
 | `↑` / `↓` | 兄弟文件夹中相同序号的 npz（上/下一个文件夹） |
 | `空格` | A/B toggle 切换 |
+| `G` | 开关临时算子格（需 2～3 张源瓦片） |
+| `P` | 文件内对比且已选起止帧时，进入序列并播放/暂停；跨文件或未选区间时忽略 |
 | `1`~`4` | 单独查看第 n 个 tile |
 | `F` | 对比面板占满 / 还原 |
 | `Ctrl+0` | 适应窗口 |
@@ -382,6 +411,36 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 | `R` | 刷新当前目录 |
 
 输入框聚焦时全部快捷键失效。
+
+### 6.6 序列播放与宫格导出（仅文件内对比）
+
+序列 = 当前 npz 所在目录里、按自然名排序的兄弟 `.npz`。对比格共用同一文件、key 不同。跨文件对比**不做**序列播放/导出；切到跨文件、清空勾选或关掉对比面板时停止播放并丢掉起止帧。
+
+**播放**
+
+- 对比图由谁驱动要显式切换：默认跟随文件列表；进入序列后跟随 playhead。胶片按钮进入/退出；播放或拖 scrubber 会自动进入。点列表里另一个 npz、或切目录，退出序列，对比立刻回到该文件。
+- 必须先选起止帧（闭区间，0 起的目录序号），不默认跑整个文件夹。
+- 序列模式中 playhead 只改对比瓦片用的 path，**不** `jumpToFile`，文件列表保持原选中项。暂停后可「定位到当前帧」。←/→ 在序列模式暂停时步进 playhead。
+- 播放中可继续平移缩放；空格仍是 A/B。播到结束帧后停止，停在最后一帧（仍留在序列模式）；再按播放从起始帧重来。
+- 仅播放中预取后续帧到内存并钉住；暂停或退出后停止。每一帧等上一帧画完再切，缓存命中也不跳帧。下一帧未就绪则等待（降低有效 fps），不盖加载转圈。
+- 拖 scrubber 时 playhead 立刻走，对比图停在上一张直到**目标帧**解码完成；不把拖过的中间帧（即使已在预取缓存里）画出来。松开后再切到目标。
+- 新文件没有某 key：该格 KEY NOT FOUND 占位，不塌布局。
+
+**导出**
+
+- 一条 MP4（H.264 / yuv420p / 无音轨），按当前宫格拼（含 auto 推导），格子标签为 `key` + 文件名；算子格标签为 `key_a <symbol> key_b` + 文件名。不烤覆盖层、不烤 A/B 闪烁。算子格会烤进视频。
+- 两种裁剪：`full` 完整原图（等高跟随面板开关）；`viewport` 按对比面板当前缩放/平移裁，公式与像素读数一致：`effective = scale * scaleFactor`，`src = (-x/effective, -y/effective, tileW/effective, tileH/effective)`。
+- 长边上限 1080 / 1920 / 2160（默认 1920）。FPS 默认 12，范围 1–60。
+- 软上限 2000 帧（需 `confirm_large`），硬上限 10000。
+- ffmpeg 经 `imageio-ffmpeg` 捆绑，不依赖系统安装。默认写到序列所在目录（`save_dir`，须在 root 内），任务返回 `saved_path`。浏览器下载可选，不自动弹出另存为。
+
+`POST /api/video/export` body：
+
+```
+path, keys:[{type?: key|op, op?, key, key_a?, key_b?, batch, layout, channel, normalize, colormap, alpha, gainmap_gamut}],
+gamut, start, end, fps, layout, crop: full|viewport, max_size, equal_height,
+confirm_large, save_dir?, viewport?: {scale,x,y,tile_width,tile_height,natural_sizes:[{width,height}]}
+```
 
 ---
 
@@ -480,3 +539,10 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 | 日期 | 变更 | 原因 |
 | --- | --- | --- |
 | 2026-08-12 | 初版 | — |
+| 2026-08-28 | 对比面板临时比值 gainmap（默认 2÷1） | 线性数组相除，不写回 npz |
+| 2026-08-28 | 比值除法保留负分母符号；0/0 记为 1 | 噪声打出的负通道不再被当成 +eps 而画出黄角 |
+| 2026-08-29 | 比值归一为可扩展二元算子；新增乘法 | 工具栏选算子和两张源图；registry 加算子 |
+| 2026-08-29 | 覆盖源可含算子格 | 仍叠到第 1 格；点格子右上角图层按钮切换覆盖源 |
+| 2026-08-29 | 对比格可重排；算子/覆盖按 (路径, key) 跟随 | 文件内只用 key；操作数下拉在重名时带文件提示 |
+| 2026-09-01 | 序列播放 render URL 带 live `v=`；无 `v=` 不标 immutable | 文件改写后对比 video 仍命中旧 HTTP / imageCache |
+| 2026-09-01 | 拖 scrubber 等到目标帧就绪才换图 | 拖过预取窗口会先闪中间缓存帧再跳到目标 |

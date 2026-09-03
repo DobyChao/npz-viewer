@@ -368,6 +368,89 @@ test("keyboard navigation walks files and sibling folders", async ({ page }) => 
   ).toHaveAttribute("data-path", /method_a\/frame_002\.npz$/);
 });
 
+test("op tile is tile 2 ÷ tile 1, can swap operands, and can switch to multiply", async ({ page }) => {
+  await selectSampleFrame(page);
+  await openInsideCompare(page, ["rgb_hwc", "gainmap"]);
+
+  await expect(page.getByTestId("op-toggle")).toBeEnabled();
+  await page.getByTestId("op-toggle").click();
+  await expect(page.getByTestId("compare-tile")).toHaveCount(3);
+
+  const derived = page.locator('[data-testid="compare-tile"][data-derived="true"]');
+  await expect(derived).toBeVisible();
+  await expect(derived).toContainText("gainmap ÷ rgb_hwc");
+  await expect(page.getByTestId("op-status")).toContainText("除法 2 ÷ 1");
+  await expect(derived.getByTestId("compare-image")).toBeVisible();
+
+  await page.getByTestId("op-swap").click();
+  await expect(derived).toContainText("rgb_hwc ÷ gainmap");
+  await expect(page.getByTestId("op-status")).toContainText("除法 1 ÷ 2");
+
+  await page.getByTestId("op-kind").selectOption("mul");
+  await expect(derived).toContainText("rgb_hwc × gainmap");
+  await expect(page.getByTestId("op-status")).toContainText("乘法 1 × 2");
+  await expect(derived.getByTestId("compare-image")).toBeVisible();
+
+  await page.getByTestId("overlay-toggle").click();
+  await expect(page.getByTestId("overlay-status")).toContainText("覆盖 2 → 1");
+  await expect(derived.getByTestId("pick-overlay-source")).toBeVisible();
+  await derived.getByTestId("pick-overlay-source").click();
+  await expect(page.getByTestId("overlay-status")).toContainText("覆盖 3 → 1");
+  await expect(page.getByTestId("compare-tile").first().getByTestId("compare-overlay")).toBeVisible();
+  await expect(page.getByTestId("compare-tile").nth(1).getByTestId("pick-overlay-source")).toBeVisible();
+
+  await derived.getByTestId("remove-tile").click();
+  await expect(page.getByTestId("compare-tile")).toHaveCount(2);
+  await expect(page.getByTestId("op-status")).toHaveCount(0);
+});
+
+test("op of mixed resolutions still paints", async ({ page }) => {
+  await selectSampleFrame(page);
+  await openInsideCompare(page, ["rgb_hwc", "gainmap_half"]);
+  await page.getByTestId("op-toggle").click();
+  const derived = page.locator('[data-testid="compare-tile"][data-derived="true"]');
+  await expect(derived.getByTestId("compare-image")).toBeVisible();
+});
+
+test("reordering tiles keeps the same operator pairing", async ({ page }) => {
+  await selectSampleFrame(page);
+  await openInsideCompare(page, ["rgb_hwc", "gainmap"]);
+  await page.getByTestId("op-toggle").click();
+
+  const derived = page.locator('[data-testid="compare-tile"][data-derived="true"]');
+  await expect(derived).toContainText("gainmap ÷ rgb_hwc");
+  await expect(page.getByTestId("op-status")).toContainText("除法 2 ÷ 1");
+  await expect(derived.getByTestId("move-tile-earlier")).toHaveCount(0);
+
+  await page.getByTestId("compare-tile").nth(1).getByTestId("move-tile-earlier").click();
+  await expect(page.getByTestId("compare-tile").first()).toHaveAttribute("data-key", "gainmap");
+  await expect(page.getByTestId("compare-tile").nth(1)).toHaveAttribute("data-key", "rgb_hwc");
+  await expect(derived).toContainText("gainmap ÷ rgb_hwc");
+  await expect(page.getByTestId("op-status")).toContainText("除法 1 ÷ 2");
+});
+
+test("cross-file op operands disambiguate the same key by path", async ({ page }) => {
+  await selectSampleFrame(page);
+  await page.getByRole("button", { name: "跨文件" }).click();
+
+  const addRgb = (card: Locator) => card.getByRole("button", { name: "对比" });
+  const baselineRgb = page.locator('[data-testid="gallery-card"][data-key="rgb_hwc"]');
+  await expect(addRgb(baselineRgb)).toBeEnabled();
+  await addRgb(baselineRgb).click();
+
+  await page.locator('[data-testid="tree-node"][data-path$="/method_a"]').first().click();
+  await page.locator('[data-testid="npz-row"][data-path$="frame_001.npz"]').click();
+  const methodRgb = page.locator('[data-testid="gallery-card"][data-key="rgb_hwc"]');
+  await expect(addRgb(methodRgb)).toBeEnabled();
+  await addRgb(methodRgb).click();
+  await expect(page.getByTestId("compare-tile")).toHaveCount(2);
+
+  await page.getByTestId("op-toggle").click();
+  const options = page.getByTestId("op-left").locator("option");
+  await expect(options.nth(0)).toHaveText(/rgb_hwc · .*baseline/);
+  await expect(options.nth(1)).toHaveText(/rgb_hwc · .*method_a/);
+});
+
 test("browsing produces no console errors or failed requests", async ({ page }) => {
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];

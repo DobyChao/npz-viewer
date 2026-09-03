@@ -167,13 +167,14 @@ export function Select<T extends string>({
   onChange,
   className,
   title,
+  ...rest
 }: {
   value: T;
   options: { value: T; label: string }[];
   onChange: (value: T) => void;
   className?: string;
   title?: string;
-}) {
+} & Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "value" | "onChange">) {
   return (
     <select
       title={title}
@@ -184,6 +185,7 @@ export function Select<T extends string>({
         "focus:border-cyan-600 focus:outline-none",
         className,
       )}
+      {...rest}
     >
       {options.map((option) => (
         <option key={option.value} value={option.value}>

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { DEFAULT_VIEW_OPTIONS } from "../lib/types";
+import { DEFAULT_OP_ID } from "../lib/ops";
 import type {
   CompareLayout,
   CompareMode,
@@ -8,6 +9,16 @@ import type {
 } from "../lib/types";
 
 export const MAX_COMPARE_ITEMS = 4;
+
+/** Extra derived tile is allowed only when 2 or 3 source tiles are showing. */
+export function canEnableOp(sourceCount: number): boolean {
+  return sourceCount >= 2 && sourceCount < MAX_COMPARE_ITEMS;
+}
+
+export function clampOperand(index: number, sourceCount: number): number {
+  if (sourceCount <= 0) return 0;
+  return Math.min(Math.max(0, index), sourceCount - 1);
+}
 
 export interface CompareItem {
   id: string;
@@ -26,6 +37,36 @@ export interface Viewport {
 
 export const IDENTITY_VIEWPORT: Viewport = { scale: 1, x: 0, y: 0 };
 
+export interface SequenceState {
+  /** When true, compare tiles follow playhead; otherwise they follow the file list. */
+  engaged: boolean;
+  start: number | null;
+  end: number | null;
+  playhead: number | null;
+  playPath: string | null;
+  playName: string | null;
+  /** mtime_size of playPath; empty until the sibling stamp is known. */
+  playVersion: string;
+  playing: boolean;
+  fps: number;
+}
+
+export const DEFAULT_SEQUENCE: SequenceState = {
+  engaged: false,
+  start: null,
+  end: null,
+  playhead: null,
+  playPath: null,
+  playName: null,
+  playVersion: "",
+  playing: false,
+  fps: 12,
+};
+
+function clearedSequence(fps: number): SequenceState {
+  return { ...DEFAULT_SEQUENCE, fps };
+}
+
 interface CompareState {
   mode: CompareMode;
   items: CompareItem[];
@@ -39,7 +80,7 @@ interface CompareState {
    * referentially stable.
    */
   overlayEnabled: boolean;
-  /** Tile index whose image is painted over tile 1; never 0. */
+  /** Display-tile index painted over tile 1; never 0. May be the derived op tile. */
   overlaySource: number;
   /**
    * True while X is held. XOR'd with overlayEnabled: hold X to overlay
@@ -52,6 +93,18 @@ interface CompareState {
    * preference, so it deliberately survives changing tiles.
    */
   equalHeight: boolean;
+  /**
+   * Temporary binary-op tile appended after the source tiles. Session-only;
+   * not written back to the npz. Survives key changes so sequence playback
+   * can keep recomputing the same pairing.
+   */
+  opEnabled: boolean;
+  /** Operator id from BINARY_OPS; default div = tile 2 ÷ tile 1. */
+  opId: string;
+  /** 0-based source-tile index of the left operand. Default 1 (tile 2). */
+  opLeft: number;
+  /** 0-based source-tile index of the right operand. Default 0 (tile 1). */
+  opRight: number;
   panel: ComparePanelState;
   /** Last split height of the compare pane, as a percentage of the right column. */
   splitComparePercent: number;
@@ -62,6 +115,7 @@ interface CompareState {
   fitToken: number;
   actualToken: number;
   showPixelReadout: boolean;
+  sequence: SequenceState;
 
   setMode: (mode: CompareMode) => void;
   addItem: (item: Omit<CompareItem, "id">) => boolean;
@@ -69,6 +123,8 @@ interface CompareState {
   clearItems: () => void;
   toggleInsideKey: (key: string) => void;
   setInsideKeys: (keys: string[]) => void;
+  /** Reorder source tiles. Operator operands and overlay source follow identity, not slot. */
+  moveSource: (from: number, to: number) => void;
   setLayout: (layout: CompareLayout) => void;
   setPanel: (panel: ComparePanelState) => void;
   setSplitComparePercent: (percent: number) => void;
@@ -79,14 +135,57 @@ interface CompareState {
   setOverlaySource: (index: number) => void;
   setOverlayPeek: (peek: boolean) => void;
   setEqualHeight: (value: boolean) => void;
+  setOpEnabled: (enabled: boolean) => void;
+  setOpId: (opId: string) => void;
+  setOpLeft: (index: number) => void;
+  setOpRight: (index: number) => void;
+  swapOpOperands: () => void;
+  toggleOp: () => void;
   setViewport: (viewport: Viewport, source?: "manual" | "fit") => void;
   requestFit: () => void;
   requestActualSize: () => void;
   setShowPixelReadout: (value: boolean) => void;
+  setSequence: (patch: Partial<SequenceState>) => void;
+  resetSequence: () => void;
+  exitSequence: () => void;
+  togglePlayback: () => void;
 }
 
 function itemId(npzPath: string, key: string): string {
   return `${npzPath}::${key}`;
+}
+
+function keepOp(sourceCount: number, enabled: boolean): boolean {
+  return enabled && canEnableOp(sourceCount);
+}
+
+function clampPair(left: number, right: number, sourceCount: number) {
+  // Keep the 2÷1 defaults while only one source tile exists; clamping here
+  // would smash opLeft 1→0 and the pair would stay 1÷1 after the second tile.
+  if (sourceCount < 2) return { opLeft: left, opRight: right };
+  return {
+    opLeft: clampOperand(left, sourceCount),
+    opRight: clampOperand(right, sourceCount),
+  };
+}
+
+function reorderList<T>(list: T[], from: number, to: number): T[] | null {
+  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return null;
+  const next = [...list];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
+
+/** Inside: key only (path follows the file list / playhead). Cross: path::key. */
+function sourceIds(mode: CompareMode, items: CompareItem[], insideKeys: string[]): string[] {
+  return mode === "cross" ? items.map((item) => item.id) : insideKeys.map((key) => `inside::${key}`);
+}
+
+function indexOfId(ids: string[], id: string | undefined, fallback: number): number {
+  if (!id) return fallback;
+  const found = ids.indexOf(id);
+  return found === -1 ? fallback : found;
 }
 
 /** Changing which tiles are on screen invalidates both the A/B cursor and the overlay pairing. */
@@ -107,6 +206,10 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   overlaySource: 1,
   overlayPeek: false,
   equalHeight: false,
+  opEnabled: false,
+  opId: DEFAULT_OP_ID,
+  opLeft: 1,
+  opRight: 0,
   panel: "hidden",
   splitComparePercent: 45,
   viewport: IDENTITY_VIEWPORT,
@@ -114,8 +217,18 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   fitToken: 0,
   actualToken: 0,
   showPixelReadout: true,
+  sequence: { ...DEFAULT_SEQUENCE },
 
-  setMode: (mode) => set({ mode, ...RESET_TILE_VIEWS }),
+  setMode: (mode) =>
+    set((state) => ({
+      mode,
+      ...RESET_TILE_VIEWS,
+      opEnabled: false,
+      opId: DEFAULT_OP_ID,
+      opLeft: 1,
+      opRight: 0,
+      sequence: clearedSequence(state.sequence.fps),
+    })),
 
   addItem: (item) => {
     const { items } = get();
@@ -125,33 +238,114 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
     set({
       items: [...items, { ...item, id, options: { ...DEFAULT_VIEW_OPTIONS, ...item.options } }],
       panel: get().panel === "hidden" ? "split" : get().panel,
+      opEnabled: keepOp(items.length + 1, get().opEnabled),
+      ...clampPair(get().opLeft, get().opRight, items.length + 1),
     });
     return true;
   },
 
   removeItem: (id) =>
-    set((state) => ({
-      items: state.items.filter((item) => item.id !== id),
-      ...RESET_TILE_VIEWS,
-    })),
+    set((state) => {
+      const items = state.items.filter((item) => item.id !== id);
+      return {
+        items,
+        ...RESET_TILE_VIEWS,
+        opEnabled: keepOp(items.length, state.opEnabled),
+        ...clampPair(state.opLeft, state.opRight, items.length),
+      };
+    }),
 
-  clearItems: () => set({ items: [], ...RESET_TILE_VIEWS }),
+  clearItems: () =>
+    set({ items: [], ...RESET_TILE_VIEWS, opEnabled: false, opLeft: 1, opRight: 0 }),
 
   toggleInsideKey: (key) =>
-    set((state) => ({
-      insideKeys: state.insideKeys.includes(key)
+    set((state) => {
+      const insideKeys = state.insideKeys.includes(key)
         ? state.insideKeys.filter((name) => name !== key)
         : state.insideKeys.length >= MAX_COMPARE_ITEMS
           ? state.insideKeys
-          : [...state.insideKeys, key],
-      ...RESET_TILE_VIEWS,
-      panel: state.panel === "hidden" ? "split" : state.panel,
-    })),
+          : [...state.insideKeys, key];
+      return {
+        insideKeys,
+        ...RESET_TILE_VIEWS,
+        opEnabled: keepOp(insideKeys.length, state.opEnabled),
+        ...clampPair(state.opLeft, state.opRight, insideKeys.length),
+        panel: state.panel === "hidden" ? "split" : state.panel,
+        sequence: insideKeys.length === 0 ? clearedSequence(state.sequence.fps) : state.sequence,
+      };
+    }),
 
   setInsideKeys: (keys) =>
-    set({ insideKeys: keys.slice(0, MAX_COMPARE_ITEMS), ...RESET_TILE_VIEWS }),
+    set((state) => ({
+      insideKeys: keys.slice(0, MAX_COMPARE_ITEMS),
+      ...RESET_TILE_VIEWS,
+      opEnabled: keepOp(Math.min(keys.length, MAX_COMPARE_ITEMS), state.opEnabled),
+      ...clampPair(state.opLeft, state.opRight, Math.min(keys.length, MAX_COMPARE_ITEMS)),
+      sequence: keys.length === 0 ? clearedSequence(state.sequence.fps) : state.sequence,
+    })),
+
+  moveSource: (from, to) =>
+    set((state) => {
+      const oldIds = sourceIds(state.mode, state.items, state.insideKeys);
+      const count = oldIds.length;
+      const leftId = oldIds[state.opLeft];
+      const rightId = oldIds[state.opRight];
+      const overlayOnDerived = Boolean(
+        state.opEnabled && canEnableOp(count) && state.overlaySource >= count,
+      );
+      const overlayId = overlayOnDerived ? undefined : oldIds[state.overlaySource];
+      const toggleOnDerived = Boolean(
+        state.toggleIndex !== null &&
+          state.opEnabled &&
+          canEnableOp(count) &&
+          state.toggleIndex >= count,
+      );
+      const toggleId =
+        state.toggleIndex === null || toggleOnDerived ? undefined : oldIds[state.toggleIndex];
+
+      const items = state.mode === "cross" ? reorderList(state.items, from, to) : null;
+      const insideKeys = state.mode === "inside" ? reorderList(state.insideKeys, from, to) : null;
+      if (state.mode === "cross" && !items) return {};
+      if (state.mode === "inside" && !insideKeys) return {};
+
+      const newIds = sourceIds(state.mode, items ?? state.items, insideKeys ?? state.insideKeys);
+      const n = newIds.length;
+      const opLeft = indexOfId(newIds, leftId, clampOperand(state.opLeft, n));
+      const opRight = indexOfId(newIds, rightId, clampOperand(state.opRight, n));
+
+      let overlaySource = state.overlaySource;
+      if (overlayOnDerived && state.opEnabled && canEnableOp(n)) {
+        overlaySource = n;
+      } else {
+        const found = overlayId ? newIds.indexOf(overlayId) : -1;
+        overlaySource = found <= 0 ? 1 : found;
+      }
+
+      let toggleIndex = state.toggleIndex;
+      if (toggleIndex !== null) {
+        if (toggleOnDerived && state.opEnabled && canEnableOp(n)) {
+          toggleIndex = n;
+        } else if (toggleId) {
+          const found = newIds.indexOf(toggleId);
+          toggleIndex = found === -1 ? 0 : found;
+        }
+      }
+
+      return {
+        ...(items ? { items } : {}),
+        ...(insideKeys ? { insideKeys } : {}),
+        opLeft,
+        opRight,
+        overlaySource,
+        toggleIndex,
+      };
+    }),
   setLayout: (layout) => set({ layout }),
-  setPanel: (panel) => set({ panel }),
+  setPanel: (panel) =>
+    set((state) => ({
+      panel,
+      sequence: panel === "hidden" ? clearedSequence(state.sequence.fps) : state.sequence,
+    })),
   setSplitComparePercent: (percent) =>
     set({ splitComparePercent: Math.min(85, Math.max(15, percent)) }),
   cyclePanel: () =>
@@ -172,6 +366,26 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   setOverlaySource: (index) => set({ overlaySource: Math.max(1, index) }),
   setOverlayPeek: (peek) => set({ overlayPeek: peek }),
   setEqualHeight: (value) => set({ equalHeight: value }),
+  setOpEnabled: (enabled) => set({ opEnabled: enabled }),
+  setOpId: (opId) => set({ opId }),
+  setOpLeft: (index) =>
+    set((state) => {
+      const source = state.mode === "cross" ? state.items.length : state.insideKeys.length;
+      return { opLeft: clampOperand(index, source) };
+    }),
+  setOpRight: (index) =>
+    set((state) => {
+      const source = state.mode === "cross" ? state.items.length : state.insideKeys.length;
+      return { opRight: clampOperand(index, source) };
+    }),
+  swapOpOperands: () =>
+    set((state) => ({ opLeft: state.opRight, opRight: state.opLeft })),
+  toggleOp: () =>
+    set((state) => {
+      const source = state.mode === "cross" ? state.items.length : state.insideKeys.length;
+      if (!canEnableOp(source)) return { opEnabled: false };
+      return { opEnabled: !state.opEnabled };
+    }),
 
   // Panning must not reset when flipping between A and B, so the viewport is group-level state.
   // Anything but an explicit fit counts as manual, which stops the panel from re-fitting
@@ -181,4 +395,32 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   requestFit: () => set((state) => ({ fitToken: state.fitToken + 1 })),
   requestActualSize: () => set((state) => ({ actualToken: state.actualToken + 1 })),
   setShowPixelReadout: (value) => set({ showPixelReadout: value }),
+  setSequence: (patch) =>
+    set((state) => ({ sequence: { ...state.sequence, ...patch } })),
+  resetSequence: () =>
+    set((state) => ({ sequence: clearedSequence(state.sequence.fps) })),
+  exitSequence: () =>
+    set((state) => ({
+      sequence: {
+        ...state.sequence,
+        engaged: false,
+        playing: false,
+        playhead: null,
+        playPath: null,
+        playName: null,
+        playVersion: "",
+      },
+    })),
+  togglePlayback: () =>
+    set((state) => {
+      const { start, end, playhead, playing } = state.sequence;
+      if (start === null || end === null || start > end) return {};
+      if (playing) return { sequence: { ...state.sequence, playing: false } };
+      const atEnd = playhead !== null && playhead >= end;
+      const nextHead =
+        playhead === null || playhead < start || playhead > end || atEnd ? start : playhead;
+      return {
+        sequence: { ...state.sequence, engaged: true, playing: true, playhead: nextHead },
+      };
+    }),
 }));

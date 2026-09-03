@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 KeyKind = Literal["rgb", "rgba", "gray", "gainmap", "stack", "table", "scalar", "raw"]
 Layout = Literal["chw", "hwc"]
@@ -132,3 +132,74 @@ class SiblingResult(BaseModel):
     name: str
     index: int
     total: int
+    mtime: float
+    size: int
+
+
+VideoJobStatus = Literal["queued", "running", "done", "error", "cancelled"]
+VideoCrop = Literal["full", "viewport"]
+CompareGridLayout = Literal["auto", "1x1", "1x2", "2x1", "1x3", "3x1", "2x2"]
+
+
+class ExportKey(BaseModel):
+    type: Literal["key", "op"] = "key"
+    op: str | None = None
+    key: str = ""
+    key_a: str | None = None
+    key_b: str | None = None
+    batch: int = 0
+    layout: str = "auto"
+    channel: int = 0
+    normalize: bool = False
+    colormap: Colormap = "none"
+    alpha: AlphaMode = "composite"
+    gainmap_gamut: bool = False
+
+    @model_validator(mode="after")
+    def require_identity(self) -> ExportKey:
+        if self.type == "op":
+            if not self.op or not self.key_a or not self.key_b:
+                raise ValueError("算子格需要 op、key_a 和 key_b")
+        elif not self.key:
+            raise ValueError("需要 key")
+        return self
+
+
+class NaturalSize(BaseModel):
+    width: int
+    height: int
+
+
+class ViewportSpec(BaseModel):
+    scale: float
+    x: float
+    y: float
+    tile_width: float
+    tile_height: float
+    natural_sizes: list[NaturalSize] = []
+
+
+class VideoExportRequest(BaseModel):
+    path: str
+    keys: list[ExportKey]
+    start: int
+    end: int
+    fps: float = 12
+    layout: CompareGridLayout = "auto"
+    crop: VideoCrop = "full"
+    max_size: int = 1920
+    equal_height: bool = False
+    confirm_large: bool = False
+    gamut: Gamut = "bt2020"
+    viewport: ViewportSpec | None = None
+    save_dir: str | None = None
+
+
+class VideoJobInfo(BaseModel):
+    id: str
+    status: VideoJobStatus
+    current: int = 0
+    total: int = 0
+    error: str | None = None
+    filename: str | None = None
+    saved_path: str | None = None

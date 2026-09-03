@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+import os
 from pathlib import Path
 
+import numpy as np
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -112,7 +114,7 @@ def test_render_max_size_downscales(client: TestClient, frame: Path) -> None:
 
 
 def test_render_etag_enables_304(client: TestClient, frame: Path) -> None:
-    params = {"path": frame.as_posix(), "key": "rgb_hwc"}
+    params = {"path": frame.as_posix(), "key": "rgb_hwc", "v": "1"}
     first = client.get("/api/npz/render", params=params)
     etag = first.headers["etag"]
     assert "immutable" in first.headers["cache-control"]
@@ -120,6 +122,12 @@ def test_render_etag_enables_304(client: TestClient, frame: Path) -> None:
     second = client.get("/api/npz/render", params=params, headers={"If-None-Match": etag})
     assert second.status_code == 304
     assert second.content == b""
+
+
+def test_render_without_version_must_revalidate(client: TestClient, frame: Path) -> None:
+    response = client.get("/api/npz/render", params={"path": frame.as_posix(), "key": "rgb_hwc"})
+    assert "immutable" not in response.headers["cache-control"]
+    assert "must-revalidate" in response.headers["cache-control"]
 
 
 def test_render_gamut_changes_the_bytes(client: TestClient, frame: Path) -> None:
@@ -230,6 +238,35 @@ def test_sibling_folder_keeps_the_ordinal(client: TestClient, sample_dir: Path) 
 def test_locate_reports_position(client: TestClient, frame: Path) -> None:
     body = client.get("/api/nav/locate", params={"path": frame.as_posix()}).json()
     assert (body["index"], body["total"]) == (0, 3)
+
+
+def test_nav_at_picks_by_ordinal(client: TestClient, frame: Path) -> None:
+    body = client.get("/api/nav/at", params={"path": frame.as_posix(), "index": 2}).json()
+    assert body["name"] == "frame_10.npz"
+    assert body["index"] == 2
+    assert body["total"] == 3
+    assert body["mtime"] > 0
+    assert body["size"] > 0
+
+
+def test_nav_at_stats_file_even_when_dirindex_is_stale(
+    client: TestClient, frame: Path
+) -> None:
+    # Warm the directory snapshot so a later in-place rewrite would otherwise
+    # keep serving the old mtime from dirindex.
+    client.get("/api/npz/list", params={"dir": frame.parent.as_posix()})
+    before = client.get("/api/nav/at", params={"path": frame.as_posix(), "index": 0}).json()
+    np.savez(frame, rgb_hwc=np.ones((12, 16, 3), dtype=np.float32))
+    os.utime(frame, (frame.stat().st_atime, frame.stat().st_mtime + 5))
+    after = client.get("/api/nav/at", params={"path": frame.as_posix(), "index": 0}).json()
+    assert after["mtime"] != before["mtime"]
+    assert after["size"] != before["size"]
+
+
+def test_nav_at_rejects_out_of_range(client: TestClient, frame: Path) -> None:
+    response = client.get("/api/nav/at", params={"path": frame.as_posix(), "index": 9})
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "BAD_PARAM"
 
 
 def test_refresh_clears_the_index(client: TestClient, sample_dir: Path) -> None:

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import clsx from "clsx";
-import { FileQuestion, Layers, X } from "lucide-react";
-import { renderUrl } from "../../lib/api";
+import { ChevronLeft, ChevronRight, FileQuestion, Layers, X } from "lucide-react";
+import { renderUrl, opRenderUrl } from "../../lib/api";
 import { useImageResource } from "../../hooks/useImageResource";
 import { usePanZoom } from "../../hooks/usePanZoom";
 import { useAppStore } from "../../store/useAppStore";
@@ -19,6 +19,8 @@ export interface TileSpec {
   options: ViewOptions;
   missing: boolean;
   removable: boolean;
+  /** Present on the temporary binary-op tile. */
+  derived?: { op: string; left: TileSpec; right: TileSpec };
 }
 
 export interface OverlayLayer {
@@ -52,6 +54,8 @@ export function CompareTile({
   onNaturalSize,
   onHoverPixel,
   onRemove,
+  onMoveEarlier,
+  onMoveLater,
 }: {
   spec: TileSpec;
   viewport: Viewport;
@@ -64,21 +68,42 @@ export function CompareTile({
   onNaturalSize: (id: string, size: { width: number; height: number }) => void;
   onHoverPixel: (spec: TileSpec, x: number, y: number) => void;
   onRemove?: () => void;
+  onMoveEarlier?: () => void;
+  onMoveLater?: () => void;
 }) {
   const gamut = useAppStore((state) => state.gamut);
   const setViewport = useCompareStore((state) => state.setViewport);
   const panZoom = usePanZoom(viewport, setViewport);
 
-  const urlFor = (target: TileSpec) =>
-    target.missing
-      ? null
-      : renderUrl({
-          path: target.npzPath,
-          key: target.key,
-          gamut,
-          version: target.version,
-          options: target.options,
-        });
+  const urlFor = (target: TileSpec) => {
+    if (target.missing) return null;
+    if (target.derived) {
+      return opRenderUrl({
+        op: target.derived.op,
+        left: {
+          path: target.derived.left.npzPath,
+          key: target.derived.left.key,
+          version: target.derived.left.version,
+          options: target.derived.left.options,
+        },
+        right: {
+          path: target.derived.right.npzPath,
+          key: target.derived.right.key,
+          version: target.derived.right.version,
+          options: target.derived.right.options,
+        },
+        gamut,
+        version: target.version,
+      });
+    }
+    return renderUrl({
+      path: target.npzPath,
+      key: target.key,
+      gamut,
+      version: target.version,
+      options: target.options,
+    });
+  };
 
   const url = urlFor(spec);
   const { src, state, error } = useImageResource(url);
@@ -99,6 +124,7 @@ export function CompareTile({
       <div
         data-testid="compare-tile"
         data-key={spec.key}
+        data-derived={spec.derived ? "true" : undefined}
         data-missing="true"
         className="relative flex min-h-0 min-w-0 flex-col items-center justify-center gap-2 border border-dashed border-zinc-700 bg-zinc-900/40"
       >
@@ -108,16 +134,38 @@ export function CompareTile({
           <div className="mt-0.5 font-mono text-[11px] text-zinc-600">{spec.key}</div>
           <div className="mt-1 truncate text-[10px] text-zinc-700">{spec.npzName}</div>
         </div>
-        {onRemove && (
-          <IconButton
-            title="从对比中移除（当前 npz 没有这个 key）"
-            data-testid="remove-tile"
-            className="absolute top-1 right-1 h-5 w-5 bg-black/65"
-            onClick={onRemove}
-          >
-            <X size={11} />
-          </IconButton>
-        )}
+        <div className="absolute top-1 right-1 flex items-center gap-1">
+          {onMoveEarlier && (
+            <IconButton
+              title="前移（对比顺序）"
+              data-testid="move-tile-earlier"
+              className="h-5 w-5 bg-black/65"
+              onClick={onMoveEarlier}
+            >
+              <ChevronLeft size={11} />
+            </IconButton>
+          )}
+          {onMoveLater && (
+            <IconButton
+              title="后移（对比顺序）"
+              data-testid="move-tile-later"
+              className="h-5 w-5 bg-black/65"
+              onClick={onMoveLater}
+            >
+              <ChevronRight size={11} />
+            </IconButton>
+          )}
+          {onRemove && (
+            <IconButton
+              title="从对比中移除（当前 npz 没有这个 key）"
+              data-testid="remove-tile"
+              className="h-5 w-5 bg-black/65"
+              onClick={onRemove}
+            >
+              <X size={11} />
+            </IconButton>
+          )}
+        </div>
       </div>
     );
   }
@@ -127,6 +175,7 @@ export function CompareTile({
       ref={panZoom.containerRef}
       data-testid="compare-tile"
       data-key={spec.key}
+      data-derived={spec.derived ? "true" : undefined}
       data-overlay={overlay ? (overlay.hidden ? "hidden" : "on") : undefined}
       className="checkerboard relative min-h-0 min-w-0 cursor-grab overflow-hidden border border-zinc-800 active:cursor-grabbing"
       onPointerDown={panZoom.onPointerDown}
@@ -164,7 +213,7 @@ export function CompareTile({
         />
       )}
 
-      {state === "loading" && (
+      {state === "loading" && !src && (
         <div className="absolute inset-0 flex items-center justify-center">
           <Spinner />
         </div>
@@ -195,6 +244,26 @@ export function CompareTile({
       </div>
 
       <div className="absolute top-1 right-1 flex items-center gap-1">
+        {onMoveEarlier && (
+          <IconButton
+            title="前移（对比顺序）"
+            data-testid="move-tile-earlier"
+            className="h-5 w-5 bg-black/65"
+            onClick={onMoveEarlier}
+          >
+            <ChevronLeft size={11} />
+          </IconButton>
+        )}
+        {onMoveLater && (
+          <IconButton
+            title="后移（对比顺序）"
+            data-testid="move-tile-later"
+            className="h-5 w-5 bg-black/65"
+            onClick={onMoveLater}
+          >
+            <ChevronRight size={11} />
+          </IconButton>
+        )}
         {onPickOverlaySource && (
           <IconButton
             title="用这一格作为覆盖源"

@@ -110,6 +110,7 @@ CHW/HWC 切换按钮，并标注歧义。
 | `←` / `→` | 上一个 / 下一个 npz（同文件夹内，自然序） |
 | `↑` / `↓` | 跳到相邻兄弟文件夹里**同序号**的 npz，用于跨版本比对；会自动跳过没有 npz 的文件夹 |
 | `空格` | A/B 翻转，在已选的对比图之间切换 |
+| `P` | 文件内对比已选起止帧时，进入序列并播放/暂停 |
 | `1`–`4` | 直接切到第 N 张对比图 |
 | 按住 `X` | 覆盖模式下临时移开覆盖层，松开恢复，用于闪烁比对 |
 | `F` | 对比面板占满右侧 / 还原分栏 |
@@ -138,6 +139,12 @@ CHW/HWC 切换按钮，并标注歧义。
 
 缩放上跟随 FastStone 的模型：处于「适应窗口」状态时，改变面板大小、增删分块、切换布局都会重新
 适应；一旦你手动滚轮缩放过，就不再自动改动你的视口，翻页也保持不变。
+
+**序列播放与导出**（只在「文件内」对比）：对比默认跟着左边选中的 npz。点胶片按钮进入序列模式后，
+格子改跟 playhead；点列表里另一个文件会退出，对比回到该文件。选出起止帧后按 `P` 连续播，
+勾选的 key 一起换文件，左边文件列表不动。导出把同一套宫格合成一条无音轨的 H.264
+MP4，默认写到该序列所在目录（可改 `save_dir`），不经过浏览器另存为对话框；也可在完成后用链接打开。
+可选完整原图或当前视口裁剪。跨文件对比没有这条能力。
 
 ## 测试
 
@@ -174,13 +181,13 @@ capture，用 JS 合成事件测不出来，所以这部分放在 Playwright 而
 
 ```
 backend/app/
-  api/          FastAPI 路由：roots / fs / npz / nav
-  services/     dirindex 目录索引、npzio 读取与分类、render 渲染管线、imgcache 磁盘缓存
+  api/          FastAPI 路由：roots / fs / npz / nav / video
+  services/     dirindex 目录索引、npzio 读取与分类、render 渲染管线、imgcache 磁盘缓存、video_export 宫格编码
   color.py      色域矩阵推导与 gamma 编码
   paths.py      路径归一化与 root 白名单校验
 frontend/src/
   components/   TopBar、FolderTree、NpzList、NpzInfo、gallery/、compare/
-  hooks/        usePanZoom、useImageResource、useHotkeys、useNpzNavigation
+  hooks/        usePanZoom、useImageResource、useHotkeys、useNpzNavigation、useSequencePlayback
   store/        zustand：应用状态与对比状态
   lib/          API 客户端、类型、格式化
 scripts/        样例与压测数据生成
