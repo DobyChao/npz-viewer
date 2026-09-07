@@ -14,6 +14,8 @@ linear RGB 图、gainmap、mask、特征图和一些小矩阵，需要快速看�
 - Python 3.11+（开发验证于 3.14）
 - Node.js `^20.19.0 || >=22.12.0`（Vite 8 的要求，已写进 `frontend/package.json` 的 `engines`；
   开发验证于 24）
+- 桌面窗口（`npm run tauri:dev` / `tauri:build`）：Rust 1.85+，以及系统 WebView
+  （Linux：`libwebkit2gtk-4.1-dev` `libgtk-3-dev`）
 
 `typecheck` 脚本直接调用 `node node_modules/typescript/lib/tsc.js` 而不是 `tsc`，这是刻意的：
 typescript 7 的 `bin/tsc` 是个**没有扩展名**的 ESM 文件，只有较新的 Node 能把它当入口执行，稍旧的
@@ -55,22 +57,35 @@ cd frontend && npm install && npm run dev
 这个文件可以在前端顶栏的「管理 root」里增删，也可以直接用编辑器改 —— 后端按 mtime 热加载，
 不用重启。Windows 和 Linux 都用正斜杠写绝对路径。
 
-### 本机客户端（可 SSH 切远程后端）
+### 本机客户端（Tauri 迭代版）
 
-浏览器不能 SSH。SSH 控制面在本机 Node 进程里（`frontend/hub/`，`ssh2`）。开发时是 Vite
-dev server；日常使用跑这个启动器即可——托管构建后的前端、提供 `/__hub`、必要时拉起本机
-Python 后端：
+这个分支按**桌面客户端**迭代。浏览器不能 SSH；窗口是 Tauri（系统 WebView，不是 Electron 自带的 Chrome），SSH 仍是本机 Node `ssh2` hub。
+
+开发（热更新 + 同一套 hub）：
 
 ```bash
-cd frontend && npm install && npm run build
+cd frontend && npm install
+npm run tauri:dev
+```
+
+会起 Vite `:5273`，再打开原生窗口。顶栏「后端服务器」可用。
+
+从源码打一个本机可执行文件（迭代用，还不是独立安装包：仍要本机有 Node / Python / 这个仓库）：
+
+```bash
+cd frontend && npm run build
+npm run tauri:build
+```
+
+发布版启动时会拉起 `node scripts/npz-view.mjs`（本机 Python + vite preview + hub），窗口打开 `http://127.0.0.1:5273`。退出窗口会停掉这层壳。
+
+只要页面、不要窗口时仍可用：
+
+```bash
 node scripts/npz-view.mjs
 ```
 
-打开 http://127.0.0.1:5273 。顶栏「后端服务器」在这种模式下可用。本机后端已在 8756 上时会复用，
-不会再起一份。只连远程、不要本机后端时：`NPZVIEW_NO_LOCAL_BACKEND=1 node scripts/npz-view.mjs`。
-
-这还不是 Electron/Tauri 安装包，就是一个本机小客户端：一个命令、一个浏览器标签。以后真要双击
-图标，也是壳这层 Node，不必把 SSH 再写一遍。
+以后要真正的安装包，再把 Node 壳打成 sidecar；SSH 不用改。
 
 ### 服务器单进程（无本机 SSH 切换）
 
@@ -122,7 +137,7 @@ cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/di
 服务器列表存在本机的 `servers.json`（已 gitignore），只含 host/user/端口/目录/认证方式/可选密钥路径。
 
 实现在本机 Node 里（`frontend/hub/`，`ssh2`）：`/__hub/*` 是管理接口，`/api/*` 被动态反代到当前后端。
-开发用 `npm run dev`，日常用 `node scripts/npz-view.mjs`（见上文「本机客户端」）。纯 Python
+桌面窗口是 Tauri（`npm run tauri:dev`）。不要窗口时用 `node scripts/npz-view.mjs`。纯 Python
 `--static-dir` 单进程没有这层 Node，不能从 UI 发起 SSH。
 
 ## 渲染规则

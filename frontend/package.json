@@ -11,6 +11,9 @@
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "app": "node ../scripts/npz-view.mjs",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "typecheck": "node node_modules/typescript/lib/tsc.js --noEmit",
     "e2e": "playwright test"
   },
@@ -28,6 +31,7 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
