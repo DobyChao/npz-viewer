@@ -15,6 +15,11 @@ export default defineConfig({
     port: Number(process.env.NPZVIEW_DEV_PORT ?? 5273),
     strictPort: true,
   },
+  preview: {
+    host: "127.0.0.1",
+    port: Number(process.env.NPZVIEW_DEV_PORT ?? 5273),
+    strictPort: true,
+  },
   build: {
     outDir: "dist",
     sourcemap: true,

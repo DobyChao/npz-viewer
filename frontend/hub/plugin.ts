@@ -1,10 +1,10 @@
-// Vite plugin that turns the dev server into a small control plane:
+// Local UI process control plane (dev server and `vite preview` / npz-view):
 //   - GET/POST/DELETE under /__hub  → manage & connect servers (always local)
 //   - everything under /api         → reverse-proxied to the ACTIVE backend
-//     (the local backend, or an SSH tunnel to a remote one)
+//     (the local one, or an SSH tunnel to a remote one)
 // The browser keeps calling /api exactly as before; only the upstream changes.
 import http from "node:http";
-import type { Connect, Plugin } from "vite";
+import type { Connect, Plugin, PreviewServer, ViteDevServer } from "vite";
 import { manager, type Target } from "./manager.ts";
 import type { ConnectAuth } from "./store.ts";
 
@@ -124,19 +124,25 @@ async function handleHub(req: Req, res: http.ServerResponse): Promise<void> {
   }
 }
 
+function attachHub(server: ViteDevServer | PreviewServer): void {
+  // Registered on the server object (not in a returned function) so these run
+  // BEFORE Vite's SPA-fallback middleware and never fall through to index.html.
+  server.middlewares.use("/__hub", (req, res) => {
+    void handleHub(req as Req, res);
+  });
+  server.middlewares.use("/api", (req, res) => {
+    proxyApi(req as Req, res, manager.activeTarget());
+  });
+  server.httpServer?.once("close", () => manager.shutdown());
+}
+
 export function hubPlugin(): Plugin {
   return {
     name: "npzview-hub",
-    configureServer(server) {
-      // Registered here (not in a returned function) so these run BEFORE Vite's
-      // internal SPA-fallback middleware and never fall through to index.html.
-      server.middlewares.use("/__hub", (req, res) => {
-        void handleHub(req as Req, res);
-      });
-      server.middlewares.use("/api", (req, res) => {
-        proxyApi(req as Req, res, manager.activeTarget());
-      });
-      server.httpServer?.once("close", () => manager.shutdown());
-    },
+    // Dev (`npm run dev`) and the packaged client (`vite preview` / npz-view)
+    // both need SSH + /api proxy. configureServer is dev-only; preview uses
+    // configurePreviewServer.
+    configureServer: attachHub,
+    configurePreviewServer: attachHub,
   };
 }

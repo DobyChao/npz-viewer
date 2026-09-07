@@ -55,14 +55,34 @@ cd frontend && npm install && npm run dev
 这个文件可以在前端顶栏的「管理 root」里增删，也可以直接用编辑器改 —— 后端按 mtime 热加载，
 不用重启。Windows 和 Linux 都用正斜杠写绝对路径。
 
-### 生产模式（单进程）
+### 本机客户端（可 SSH 切远程后端）
+
+浏览器不能 SSH。SSH 控制面在本机 Node 进程里（`frontend/hub/`，`ssh2`）。开发时是 Vite
+dev server；日常使用跑这个启动器即可——托管构建后的前端、提供 `/__hub`、必要时拉起本机
+Python 后端：
+
+```bash
+cd frontend && npm install && npm run build
+node scripts/npz-view.mjs
+```
+
+打开 http://127.0.0.1:5273 。顶栏「后端服务器」在这种模式下可用。本机后端已在 8756 上时会复用，
+不会再起一份。只连远程、不要本机后端时：`NPZVIEW_NO_LOCAL_BACKEND=1 node scripts/npz-view.mjs`。
+
+这还不是 Electron/Tauri 安装包，就是一个本机小客户端：一个命令、一个浏览器标签。以后真要双击
+图标，也是壳这层 Node，不必把 SSH 再写一遍。
+
+### 服务器单进程（无本机 SSH 切换）
+
+数据已经在这台机器上、别人用浏览器直接打开时，仍然可以只跑 Python：
 
 ```bash
 cd frontend && npm run build
 cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/dist
 ```
 
-此时后端同时提供 API 和前端静态文件，只需要访问 http://127.0.0.1:8756 一个地址。
+此时访问 http://127.0.0.1:8756 一个地址。没有 Node，也就没有 UI 里「连另一台机器」的能力——
+那是上面「本机客户端」的事。
 
 ### 常用启动参数
 
@@ -101,8 +121,9 @@ cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/di
 要求：服务器上有 `python3`（3.13+ 才能用视频导出）。每台服务器有各自的 `roots.json` 和缓存。
 服务器列表存在本机的 `servers.json`（已 gitignore），只含 host/user/端口/目录/认证方式/可选密钥路径。
 
-实现在 Vite dev server 里（`frontend/hub/`，用 Node `ssh2`）：`/__hub/*` 是本机管理接口，`/api/*`
-被动态反代到当前后端。用于 `npm run dev`。
+实现在本机 Node 里（`frontend/hub/`，`ssh2`）：`/__hub/*` 是管理接口，`/api/*` 被动态反代到当前后端。
+开发用 `npm run dev`，日常用 `node scripts/npz-view.mjs`（见上文「本机客户端」）。纯 Python
+`--static-dir` 单进程没有这层 Node，不能从 UI 发起 SSH。
 
 ## 渲染规则
 
