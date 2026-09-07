@@ -77,7 +77,15 @@ cd frontend && npm run build
 npm run tauri:build
 ```
 
-发布版启动时会拉起 `node scripts/npz-view.mjs`（本机 Python + vite preview + hub），窗口打开 `http://127.0.0.1:5273`。退出窗口会停掉这层壳。
+Windows x64（在 Linux 上交叉编译，或本机装了 Rust + WebView2 时直接 `tauri:build`）：
+
+```bash
+cd frontend && npm run tauri:build:windows
+```
+
+产物在 `frontend/src-tauri/target/x86_64-pc-windows-msvc/release/`。把 `npz-view.exe` 放到仓库根目录（和 `scripts/` 同级）再运行；不要装到 Program Files。需要 Node、Python、已 `npm install`，以及 Windows 自带的 WebView2。
+
+发布版启动时会拉起 `node scripts/npz-view.mjs`（本机 Python + vite preview + hub），窗口打开 `http://127.0.0.1:5273`。退出窗口会停掉这层壳。Windows 上 Node 日志写在仓库根目录的 `npz-view-hub.log`。
 
 只要页面、不要窗口时仍可用：
 

@@ -25,6 +25,9 @@ type BoxError = Box<dyn Error>;
 
 fn find_repo_root() -> Result<PathBuf, BoxError> {
     let mut starts = Vec::new();
+    if let Ok(root) = std::env::var("NPZVIEW_ROOT") {
+        starts.push(PathBuf::from(root));
+    }
     if let Ok(cwd) = std::env::current_dir() {
         starts.push(cwd);
     }
@@ -60,9 +63,26 @@ fn spawn_hub(root: &Path) -> Result<Child, BoxError> {
     let mut cmd = Command::new(node_bin());
     cmd.arg(&script)
         .current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+        .stdin(Stdio::null());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let log_path = root.join("npz-view-hub.log");
+        let log = std::fs::File::create(&log_path).map_err(|err| {
+            format!("无法写入 {log_path:?}: {err}")
+        })?;
+        let log_err = log.try_clone()?;
+        cmd.stdout(Stdio::from(log))
+            .stderr(Stdio::from(log_err))
+            .creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    }
+
     Ok(cmd
         .spawn()
         .map_err(|err| format!("启动 Node 客户端壳失败 ({script:?}): {err}"))?)
@@ -103,6 +123,12 @@ fn kill_shell(shell: &HubShell) {
                     .args(["-TERM", &child.id().to_string()])
                     .status();
                 thread::sleep(Duration::from_millis(600));
+            }
+            #[cfg(windows)]
+            {
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                    .status();
             }
             let _ = child.kill();
             let _ = child.wait();

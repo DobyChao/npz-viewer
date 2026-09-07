@@ -1,0 +1,15 @@
+npz 浏览器 — Windows x64 迭代版
+
+这不是独立安装包。把本 zip 解压到 npz-viewer 仓库根目录（和 scripts、frontend、backend 同级），或解压到仓库里的任意子目录。
+
+运行前本机需要：
+  1. 已 clone 本仓库这个客户端分支
+  2. Node.js 20.19+ 或 22.12+（在 PATH 里，命令是 node）
+  3. Python 3.11+（建议仓库根目录有 .venv）
+  4. 在 frontend 里执行过：npm install && npm run build
+  5. Windows 10/11 自带的 WebView2（一般已有）
+
+然后双击 npz-view.exe。不要装到 Program Files。
+
+窗口会拉起本机 Node 壳（vite preview + ssh2 hub + 本地 Python :8756）。
+关掉窗口会停掉这层壳。若打不开，看仓库根目录的 npz-view-hub.log。
