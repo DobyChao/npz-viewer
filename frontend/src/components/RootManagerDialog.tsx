@@ -30,15 +30,18 @@ export function RootManagerDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="管理 root" onClose={onClose} width="max-w-2xl">
-      <div className="space-y-4">
-        <p className="text-xs text-zinc-500">
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        <p className="shrink-0 text-xs text-zinc-500">
           root 保存在后端的 <code className="text-zinc-400">roots.json</code>
           ，也可以直接编辑该文件，后端会自动热加载。路径必须是绝对路径，Windows 形如
           <code className="text-zinc-400"> D:/data</code>，Linux 形如
           <code className="text-zinc-400"> /mnt/data</code>。
         </p>
 
-        <div className="rounded border border-zinc-800">
+        <div
+          data-testid="root-list"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded border border-zinc-800"
+        >
           {isLoading && (
             <div className="flex items-center gap-2 p-3 text-xs text-zinc-500">
               <Spinner /> 加载中
@@ -73,7 +76,7 @@ export function RootManagerDialog({ onClose }: { onClose: () => void }) {
           ))}
         </div>
 
-        <div className="flex items-end gap-2">
+        <div className="flex shrink-0 items-end gap-2">
           <label className="flex-1">
             <span className="mb-1 block text-[11px] text-zinc-500">显示名（可留空）</span>
             <TextInput

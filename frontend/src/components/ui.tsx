@@ -311,21 +311,21 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-10"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-hidden bg-black/60 p-10"
       onClick={onClose}
     >
       <div
         className={clsx(
-          "w-full rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl",
+          "flex max-h-[calc(100dvh-5rem)] min-h-0 w-full flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl",
           width,
         )}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2.5">
+        <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-2.5">
           <h2 className="text-sm font-medium text-zinc-200">{title}</h2>
           <Button onClick={onClose}>关闭</Button>
         </div>
-        <div className="p-4">{children}</div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">{children}</div>
       </div>
     </div>
   );

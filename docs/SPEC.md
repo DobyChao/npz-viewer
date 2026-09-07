@@ -104,12 +104,13 @@ elif dtype in (float16, float32, float64): pass   # 已是 linear 0~1 语义
 
 1. 归一化（4.2）
 2. 取通道，按 layout 转成 HWC
-3. clip：
-   - 普通图：`rgb = clip(rgb, 0, 1)`
-   - gainmap：`rgb = clip(rgb, 0, 2) / 2`
-4. 色域变换（仅当 `gamut=p3` 时）：`rgb_linear = rgb_linear @ M_2020_to_P3.T`，然后再次 `clip(0, 1)`
+3. 色域变换（仅当 `gamut=p3` 时）：`rgb_linear = rgb_linear @ M_2020_to_P3.T`
+   - **必须在 clip 之前**，这样超范围通道的能量会先混进目标色域，再按目标空间裁切
    - `gamut=bt2020` 时不做任何矩阵变换
    - **gainmap 默认不做色域变换**（它是比值图不是色度量），卡片上提供开关允许强制转换
+4. clip：
+   - 普通图：`rgb = clip(rgb, 0, 1)`
+   - gainmap：`rgb = clip(rgb, 0, 2) / 2`
 5. gamma 编码：`out = rgb ** (1/2.2)`（纯 power function，不是 sRGB 分段曲线）
 6. alpha 通道（若有）：只做 `clip(0,1)`，**不参与 gamma、不参与色域变换**
 7. 量化：`uint8(round(out * 255))`，输出 PNG（RGBA 时输出 RGBA PNG，前端用 CSS 棋盘格垫底）

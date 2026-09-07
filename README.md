@@ -93,8 +93,8 @@ cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/di
 | 四维 `[B,...]` | 带 batch | 卡片上可以切换 batch 序号 |
 | 一维、或不超过 9×9 的二维 | `table` | 直接列出数值 |
 
-**色域**：顶栏可以在 BT.2020 和 P3 之间切换。选 P3 时会做一次 BT.2020 → Display P3 的矩阵变换
-再 gamma 编码；矩阵由两个色域的原色/白点坐标现算（见 `backend/app/color.py`），不是硬编码常数。
+**色域**：顶栏可以在 BT.2020 和 P3 之间切换。选 P3 时先做一次 BT.2020 → Display P3 的矩阵变换，
+再 clip、再 gamma 编码；矩阵由两个色域的原色/白点坐标现算（见 `backend/app/color.py`），不是硬编码常数。
 
 输出的 PNG/WebP **不嵌入 ICC profile**，浏览器一律按 sRGB 解释。所以 P3 模式是"数值变换后按
 sRGB 显示"，在广色域屏上是近似效果，用于对比两种色域下的数值差异，不适合当色彩校样。这是一个

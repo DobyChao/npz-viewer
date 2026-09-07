@@ -11,7 +11,7 @@ import { Button, IconButton, Segmented, Select } from "./ui";
 
 const GAMUT_OPTIONS: { value: Gamut; label: string; title: string }[] = [
   { value: "bt2020", label: "BT.2020", title: "不做色域变换，直接 gamma 编码" },
-  { value: "p3", label: "P3", title: "先做 BT.2020 → Display P3 矩阵变换再 gamma 编码" },
+  { value: "p3", label: "P3", title: "先做 BT.2020 → Display P3 矩阵变换，再 clip、再 gamma 编码" },
 ];
 
 export function TopBar() {
