@@ -24,7 +24,7 @@ from .render import (
 
 DIVIDE_EPS = np.float32(1e-6)
 # Bump when apply/align/encode semantics change so disk render cache drops old PNGs.
-OP_CACHE_VERSION = 1
+OP_CACHE_VERSION = 2
 
 ApplyFn = Callable[
     [npt.NDArray[np.float32], npt.NDArray[np.float32]], npt.NDArray[np.float32]

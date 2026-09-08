@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from app.color import bt2020_to_p3, encode_gamma, to_uint8
 from app.errors import BadParam
 from app.models import KeyMeta
 from app.services.npzio import classify
@@ -85,6 +86,17 @@ def test_bt2020_mode_leaves_values_untouched() -> None:
     assert render("rgb_hwc", array, gamut="bt2020")[0, 0].tolist() == [136, 186, 255]
 
 
+def test_p3_converts_before_clipping() -> None:
+    # Over-range BT.2020 must be matrix-converted first; clipping then converting
+    # would drop the extra energy before it can mix into the other P3 channels.
+    over = filled((2, 2, 3), [1.5, 0.5, 0.25])
+    clipped_then_convert = filled((2, 2, 3), [1.0, 0.5, 0.25])
+    expected = to_uint8(encode_gamma(np.clip(bt2020_to_p3(over), 0.0, 1.0)))
+    pixels = render("rgb_hwc", over, gamut="p3")
+    assert pixels.tolist() == expected.tolist()
+    assert not np.array_equal(pixels, render("rgb_hwc", clipped_then_convert, gamut="p3"))
+
+
 # --- gainmap ---------------------------------------------------------------
 
 
@@ -111,6 +123,17 @@ def test_gainmap_gamut_flag_opts_into_conversion() -> None:
     forced = render("hdr_gainmap", array, gamut="p3", gainmap_gamut=True)
     plain = render("hdr_gainmap", array, gamut="bt2020")
     assert not np.array_equal(forced, plain)
+
+
+def test_gainmap_gamut_converts_before_clipping() -> None:
+    over = filled((2, 2, 3), [3.0, 0.5, 0.25])
+    clipped_then_convert = filled((2, 2, 3), [2.0, 0.5, 0.25])
+    expected = to_uint8(encode_gamma(np.clip(bt2020_to_p3(over), 0.0, 2.0) / 2.0))
+    pixels = render("hdr_gainmap", over, gamut="p3", gainmap_gamut=True)
+    assert pixels.tolist() == expected.tolist()
+    assert not np.array_equal(
+        pixels, render("hdr_gainmap", clipped_then_convert, gamut="p3", gainmap_gamut=True)
+    )
 
 
 def test_single_channel_gainmap_stays_linear() -> None:

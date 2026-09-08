@@ -23,6 +23,8 @@ LONG_VECTOR_FULL_LIMIT = 256
 RAW_REPR_LIMIT = 2048
 
 MIME_BY_FORMAT = {"png": "image/png", "webp": "image/webp"}
+# Bump when pixel semantics change so disk render/thumb caches do not serve old PNGs.
+RENDER_CACHE_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,10 +119,10 @@ def render_color_plane(
             raise BadParam("该数组没有 alpha 通道")
         return to_uint8(np.clip(_finite(alpha), 0.0, 1.0))
 
-    rgb = np.clip(rgb, 0.0, 2.0) / 2.0 if is_gainmap else np.clip(rgb, 0.0, 1.0)
-
     if gamut == "p3" and (not is_gainmap or gainmap_gamut):
-        rgb = np.clip(bt2020_to_p3(rgb), 0.0, 1.0)
+        rgb = bt2020_to_p3(rgb)
+
+    rgb = np.clip(rgb, 0.0, 2.0) / 2.0 if is_gainmap else np.clip(rgb, 0.0, 1.0)
 
     pixels = to_uint8(encode_gamma(rgb))
 
@@ -212,7 +214,13 @@ def encode_image(pixels: npt.NDArray[np.uint8], params: RenderParams) -> bytes:
 
 def _cache_digest(path: Path, current: npzio.FileStamp, params: RenderParams) -> str:
     return imgcache.digest_for(
-        (os.path.normcase(str(path)), current.mtime, current.size, astuple(params))
+        (
+            os.path.normcase(str(path)),
+            current.mtime,
+            current.size,
+            astuple(params),
+            RENDER_CACHE_VERSION,
+        )
     )
 
 
