@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, HardDrive, Settings, SlidersHorizontal } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRight, HardDrive, Server, Settings, SlidersHorizontal } from "lucide-react";
 import { api } from "../lib/api";
+import { hub } from "../lib/hub";
 import { breadcrumbs } from "../lib/format";
 import { useAppStore } from "../store/useAppStore";
 import type { Gamut, RootInfo } from "../lib/types";
 import { RootManagerDialog } from "./RootManagerDialog";
 import { SettingsDialog } from "./SettingsDialog";
+import { ServersDialog } from "./servers/ServersDialog";
 import { Button, IconButton, Segmented, Select } from "./ui";
 
 const GAMUT_OPTIONS: { value: Gamut; label: string; title: string }[] = [
@@ -15,7 +17,9 @@ const GAMUT_OPTIONS: { value: Gamut; label: string; title: string }[] = [
 ];
 
 export function TopBar() {
+  const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ["roots"], queryFn: api.roots });
+  const { data: hubState } = useQuery({ queryKey: ["hub-state"], queryFn: hub.state });
   const rootId = useAppStore((state) => state.rootId);
   const currentDir = useAppStore((state) => state.currentDir);
   const gamut = useAppStore((state) => state.gamut);
@@ -24,6 +28,20 @@ export function TopBar() {
   const setGamut = useAppStore((state) => state.setGamut);
   const [showRoots, setShowRoots] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showServers, setShowServers] = useState(false);
+
+  const activeServer = hubState?.servers.find((server) => server.active);
+  const backendLabel = hubState?.localActive === false && activeServer ? activeServer.name : "本机";
+  const backendRemote = hubState?.localActive === false;
+
+  // Switching the backend invalidates every path: drop cached data (but keep the
+  // hub state) and clear the selection so the new backend's roots load fresh.
+  const onBackendSwitched = () => {
+    setRoot(null, null);
+    queryClient.removeQueries({
+      predicate: (query) => query.queryKey[0] !== "hub-state",
+    });
+  };
 
   const roots: RootInfo[] = data?.roots ?? [];
   const activeRoot = roots.find((root) => root.id === rootId) ?? null;
@@ -86,6 +104,21 @@ export function TopBar() {
       </nav>
 
       <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          title="后端服务器"
+          onClick={() => setShowServers(true)}
+          className="inline-flex items-center gap-1.5 rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-800"
+        >
+          <span
+            className={
+              "inline-block h-2 w-2 rounded-full " +
+              (backendRemote ? "bg-emerald-500" : "bg-zinc-500")
+            }
+          />
+          <Server size={13} className={backendRemote ? "text-emerald-400" : "text-zinc-400"} />
+          <span className="max-w-28 truncate">{backendLabel}</span>
+        </button>
         <span className="text-[11px] text-zinc-500">显示色域</span>
         <Segmented value={gamut} options={GAMUT_OPTIONS} onChange={setGamut} />
         <IconButton title="设置" onClick={() => setShowSettings(true)}>
@@ -101,6 +134,9 @@ export function TopBar() {
 
       {showRoots && <RootManagerDialog onClose={() => setShowRoots(false)} />}
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showServers && (
+        <ServersDialog onClose={() => setShowServers(false)} onSwitched={onBackendSwitched} />
+      )}
     </header>
   );
 }

@@ -13,4 +13,8 @@ _verify/
 sample_data/
 stress_data/
 roots.json
+servers.json
+frontend/src-tauri/target/
+frontend/src-tauri/gen/
+npz-view-hub.log
 .DS_Store
