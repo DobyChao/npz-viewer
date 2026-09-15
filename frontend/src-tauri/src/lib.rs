@@ -2,8 +2,9 @@
 //!
 //! Dev (`tauri dev`): Vite already has ssh2 via hubPlugin; the webview just
 //! opens http://127.0.0.1:5273.
-//! Release: spawn `scripts/npz-view.mjs` (Python backend + vite preview + hub),
-//! wait until /__hub is up, then point the webview at the same URL.
+//! Release: spawn `scripts/npz-view.mjs` (Python backend + UI/hub), wait until
+//! /__hub is up, then point the webview at the same URL.
+//! Portable zip: Node and Python live under `runtime/` next to the exe.
 
 use std::error::Error;
 use std::io::{Read, Write};
@@ -47,23 +48,69 @@ fn find_repo_root() -> Result<PathBuf, BoxError> {
             }
         }
     }
-    Err("找不到仓库根目录（缺少 scripts/npz-view.mjs）。请从克隆下来的仓库运行客户端。".into())
+    Err(
+        "找不到客户端目录（缺少 scripts/npz-view.mjs）。请把便携 zip 解压到普通文件夹后再运行，不要放到 Program Files。"
+            .into(),
+    )
 }
 
-fn node_bin() -> &'static str {
-    if cfg!(windows) {
-        "node.exe"
-    } else {
-        "node"
+fn bundled_node(root: &Path) -> Option<PathBuf> {
+    let win = root.join("runtime").join("node").join("node.exe");
+    if win.is_file() {
+        return Some(win);
     }
+    let posix = root.join("runtime").join("node").join("bin").join("node");
+    if posix.is_file() {
+        return Some(posix);
+    }
+    None
+}
+
+fn node_bin(root: &Path) -> PathBuf {
+    bundled_node(root).unwrap_or_else(|| {
+        PathBuf::from(if cfg!(windows) { "node.exe" } else { "node" })
+    })
+}
+
+fn prepend_runtime_path(root: &Path, cmd: &mut Command) {
+    let mut extras: Vec<PathBuf> = Vec::new();
+    let node_dir = root.join("runtime").join("node");
+    if node_dir.join("node.exe").is_file() || node_dir.join("bin").join("node").is_file() {
+        extras.push(node_dir.clone());
+        extras.push(node_dir.join("bin"));
+    }
+    let py_dir = root.join("runtime").join("python");
+    if py_dir.is_dir() {
+        extras.push(py_dir.clone());
+        extras.push(py_dir.join("Scripts"));
+        extras.push(py_dir.join("bin"));
+    }
+    if extras.is_empty() {
+        return;
+    }
+    let old = std::env::var("PATH").unwrap_or_default();
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let mut parts: Vec<String> = extras
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    parts.push(old);
+    cmd.env("PATH", parts.join(sep));
 }
 
 fn spawn_hub(root: &Path) -> Result<Child, BoxError> {
     let script = root.join("scripts").join("npz-view.mjs");
-    let mut cmd = Command::new(node_bin());
+    let node = node_bin(root);
+    let portable = bundled_node(root).is_some();
+    let mut cmd = Command::new(&node);
     cmd.arg(&script)
         .current_dir(root)
-        .stdin(Stdio::null());
+        .stdin(Stdio::null())
+        .env("NPZVIEW_ROOT", root);
+    if portable {
+        cmd.env("NPZVIEW_PORTABLE", "1");
+    }
+    prepend_runtime_path(root, &mut cmd);
 
     #[cfg(windows)]
     {
@@ -85,7 +132,7 @@ fn spawn_hub(root: &Path) -> Result<Child, BoxError> {
 
     Ok(cmd
         .spawn()
-        .map_err(|err| format!("启动 Node 客户端壳失败 ({script:?}): {err}"))?)
+        .map_err(|err| format!("启动 Node 客户端壳失败 ({node:?} {script:?}): {err}"))?)
 }
 
 fn wait_http(port: u16, path: &str, timeout: Duration) -> Result<(), BoxError> {
@@ -108,7 +155,7 @@ fn wait_http(port: u16, path: &str, timeout: Duration) -> Result<(), BoxError> {
         thread::sleep(Duration::from_millis(300));
     }
     Err(format!(
-        "等待 http://127.0.0.1:{port}{path} 超时。确认已 npm install / npm run build，且本机有 Python。"
+        "等待 http://127.0.0.1:{port}{path} 超时。看同目录 npz-view-hub.log。便携版请确认 zip 解压完整；源码运行请确认已 npm install / npm run build，且本机有 Python。"
     )
     .into())
 }
@@ -116,7 +163,7 @@ fn wait_http(port: u16, path: &str, timeout: Duration) -> Result<(), BoxError> {
 fn kill_shell(shell: &HubShell) {
     if let Ok(mut guard) = shell.0.lock() {
         if let Some(mut child) = guard.take() {
-            // SIGTERM so npz-view.mjs can stop Python / vite; then force-kill.
+            // SIGTERM so npz-view.mjs can stop Python / hub; then force-kill.
             #[cfg(unix)]
             {
                 let _ = Command::new("kill")

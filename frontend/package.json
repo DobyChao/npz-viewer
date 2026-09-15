@@ -15,6 +15,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:build:windows": "tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis",
+    "pack:windows": "node ../scripts/pack-windows-portable.mjs",
     "typecheck": "node node_modules/typescript/lib/tsc.js --noEmit",
     "e2e": "playwright test"
   },

@@ -4,13 +4,13 @@
 //     (the local one, or an SSH tunnel to a remote one)
 // The browser keeps calling /api exactly as before; only the upstream changes.
 import http from "node:http";
-import type { Connect, Plugin, PreviewServer, ViteDevServer } from "vite";
+import type { Plugin, PreviewServer, ViteDevServer } from "vite";
 import { manager, type Target } from "./manager.ts";
 import type { ConnectAuth } from "./store.ts";
 
-type Req = Connect.IncomingMessage;
+export type HubReq = http.IncomingMessage & { originalUrl?: string };
 
-function readBody(req: Req): Promise<string> {
+function readBody(req: HubReq): Promise<string> {
   return new Promise((resolve) => {
     let data = "";
     req.on("data", (chunk) => (data += chunk));
@@ -35,7 +35,7 @@ function parseAuth(body: Record<string, unknown>): ConnectAuth {
   };
 }
 
-function proxyApi(req: Req, res: http.ServerResponse, target: Target): void {
+export function proxyApi(req: HubReq, res: http.ServerResponse, target: Target): void {
   const path = req.originalUrl ?? req.url ?? "/";
   const upstream = http.request(
     {
@@ -70,7 +70,7 @@ function proxyApi(req: Req, res: http.ServerResponse, target: Target): void {
   req.pipe(upstream);
 }
 
-async function handleHub(req: Req, res: http.ServerResponse): Promise<void> {
+export async function handleHub(req: HubReq, res: http.ServerResponse): Promise<void> {
   const url = req.url ?? "/";
   const path = url.split("?")[0];
   const method = req.method ?? "GET";
@@ -128,10 +128,10 @@ function attachHub(server: ViteDevServer | PreviewServer): void {
   // Registered on the server object (not in a returned function) so these run
   // BEFORE Vite's SPA-fallback middleware and never fall through to index.html.
   server.middlewares.use("/__hub", (req, res) => {
-    void handleHub(req as Req, res);
+    void handleHub(req as HubReq, res);
   });
   server.middlewares.use("/api", (req, res) => {
-    proxyApi(req as Req, res, manager.activeTarget());
+    proxyApi(req as HubReq, res, manager.activeTarget());
   });
   server.httpServer?.once("close", () => manager.shutdown());
 }

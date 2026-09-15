@@ -57,7 +57,7 @@ cd frontend && npm install && npm run dev
 这个文件可以在前端顶栏的「管理 root」里增删，也可以直接用编辑器改 —— 后端按 mtime 热加载，
 不用重启。Windows 和 Linux 都用正斜杠写绝对路径。
 
-### 本机客户端（Tauri 迭代版）
+### 本机客户端（Tauri）
 
 这个分支按**桌面客户端**迭代。浏览器不能 SSH；窗口是 Tauri（系统 WebView，不是 Electron 自带的 Chrome），SSH 仍是本机 Node `ssh2` hub。
 
@@ -70,30 +70,33 @@ npm run tauri:dev
 
 会起 Vite `:5273`，再打开原生窗口。顶栏「后端服务器」可用。
 
-从源码打一个本机可执行文件（迭代用，还不是独立安装包：仍要本机有 Node / Python / 这个仓库）：
+#### Windows 便携 zip（解压即用）
+
+在 64 位 Windows 上（需 Node、Rust、本机 WebView2）：
+
+```bash
+cd frontend && npm install
+npm run pack:windows
+```
+
+产物是 `dist-portable/npz-view-0.1.0-windows-x64.zip`。解压到普通文件夹，双击 `npz-view.exe`。zip 里已带 Node、embeddable Python 和前端 dist，**不需要**再装 Node / Python，也**不要**放到 Program Files。本机只需 Windows 自带的 WebView2。打不开时看同目录 `npz-view-hub.log`。
+
+源码直接打 exe（迭代用，仍要本机 Node / Python / 这份仓库）：
 
 ```bash
 cd frontend && npm run build
 npm run tauri:build
 ```
 
-Windows x64（在 Linux 上交叉编译，或本机装了 Rust + WebView2 时直接 `tauri:build`）：
+Windows x64 交叉编译（Linux 上）仍可用 `npm run tauri:build:windows`；那个 NSIS `setup.exe` 会装到 Program Files，便携布局对不上，请用上面的 zip。
 
-```bash
-cd frontend && npm run tauri:build:windows
-```
-
-产物在 `frontend/src-tauri/target/x86_64-pc-windows-msvc/release/`。把 `npz-view.exe` 放到仓库根目录（和 `scripts/` 同级）再运行；不要装到 Program Files。需要 Node、Python、已 `npm install`，以及 Windows 自带的 WebView2。
-
-发布版启动时会拉起 `node scripts/npz-view.mjs`（本机 Python + vite preview + hub），窗口打开 `http://127.0.0.1:5273`。退出窗口会停掉这层壳。Windows 上 Node 日志写在仓库根目录的 `npz-view-hub.log`。
+发布版启动时会拉起 `scripts/npz-view.mjs`（便携版用自带 Python + 自带 hub；源码运行则用本机 Python + vite preview）。窗口打开 `http://127.0.0.1:5273`。退出窗口会停掉这层壳。Windows 上 Node 日志写在客户端目录的 `npz-view-hub.log`。
 
 只要页面、不要窗口时仍可用：
 
 ```bash
 node scripts/npz-view.mjs
 ```
-
-以后要真正的安装包，再把 Node 壳打成 sidecar；SSH 不用改。
 
 ### 服务器单进程（无本机 SSH 切换）
 

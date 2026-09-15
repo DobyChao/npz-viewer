@@ -16,6 +16,11 @@ const EXCLUDE_NAMES = new Set([
   "__pycache__",
   "_verify",
   "node_modules",
+  "runtime",
+  "dist-portable",
+  "packaging",
+  "npz-view.exe",
+  "npz-view-hub.log",
 ]);
 
 export interface SyncStats {
