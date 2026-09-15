@@ -21,6 +21,7 @@ import {
 import {
   BOOTSTRAP_SH,
   envPrefix,
+  HEALTH_PY,
   KILL_OURS_PY,
   OURS_FALLBACK_SH,
   OWNERSHIP_PY,
@@ -83,7 +84,7 @@ function log(conn: Conn, line: string): void {
   for (const part of line.split(/\r?\n/)) {
     if (part.trim()) conn.log.push(part);
   }
-  if (conn.log.length > 80) conn.log.splice(0, conn.log.length - 80);
+  if (conn.log.length > 200) conn.log.splice(0, conn.log.length - 200);
 }
 
 function expandUserPath(path: string): string {
@@ -175,7 +176,12 @@ interface ExecResult {
   stderr: string;
 }
 
-function exec(client: Client, command: string, stdin?: string): Promise<ExecResult> {
+function exec(
+  client: Client,
+  command: string,
+  stdin?: string,
+  onOutput?: (line: string) => void,
+): Promise<ExecResult> {
   return new Promise((resolveExec, rejectExec) => {
     client.exec(command, (err, stream: ClientChannel) => {
       if (err) {
@@ -184,13 +190,28 @@ function exec(client: Client, command: string, stdin?: string): Promise<ExecResu
       }
       let stdout = "";
       let stderr = "";
+      let hold = "";
+      const take = (chunk: Buffer | string) => {
+        const text = String(chunk);
+        hold += text;
+        const parts = hold.split(/\r?\n/);
+        hold = parts.pop() ?? "";
+        if (onOutput) {
+          for (const part of parts) {
+            if (part.trim()) onOutput(part);
+          }
+        }
+      };
       stream.on("data", (chunk: Buffer | string) => {
         stdout += String(chunk);
+        take(chunk);
       });
       stream.stderr.on("data", (chunk: Buffer | string) => {
         stderr += String(chunk);
+        take(chunk);
       });
       stream.on("close", (code: number | null) => {
+        if (onOutput && hold.trim()) onOutput(hold);
         resolveExec({ code: code ?? 0, stdout, stderr });
       });
       stream.on("error", rejectExec);
@@ -202,8 +223,18 @@ function exec(client: Client, command: string, stdin?: string): Promise<ExecResu
   });
 }
 
+function parseLastJson<T>(stdout: string): T | null {
+  const line = stdout.trim().split(/\r?\n/).pop() ?? "";
+  if (!line) return null;
+  try {
+    return JSON.parse(line) as T;
+  } catch {
+    return null;
+  }
+}
+
 async function expandRemoteDir(client: Client, remoteDir: string): Promise<string> {
-  const trimmed = remoteDir.trim() || "~/npz-viewer";
+  const trimmed = remoteDir.trim() || "~/.npz-viewer-backend";
   if (!trimmed.startsWith("~")) return trimmed;
   const home = await exec(client, 'printf %s "$HOME"');
   const root = home.stdout || "/tmp";
@@ -279,37 +310,88 @@ function isNpzHealth(status: number, body: string): boolean {
 
 export type PortKind = "idle" | "ours" | "other_app" | "other_user";
 
-async function weOwnListener(client: Client, port: number, remoteDir: string): Promise<boolean> {
+async function listenerInfo(
+  client: Client,
+  port: number,
+  remoteDir: string,
+): Promise<{ uids: number[]; me: number } | null> {
   const prefix = envPrefix(remoteDir, port);
   const py = await exec(client, `${prefix} python3 -`, OWNERSHIP_PY);
-  if (py.code === 0) {
-    try {
-      const line = py.stdout.trim().split(/\r?\n/).pop() ?? "";
-      const info = JSON.parse(line) as { uids?: number[]; me?: number };
-      if (Array.isArray(info.uids) && info.uids.length > 0 && typeof info.me === "number") {
-        return info.uids.every((uid) => uid === info.me);
-      }
-    } catch {
-      /* fall through */
-    }
+  if (py.code !== 0) return null;
+  const info = parseLastJson<{ uids?: unknown; me?: unknown }>(py.stdout);
+  if (!info || !Array.isArray(info.uids) || typeof info.me !== "number") return null;
+  const uids = info.uids.filter((uid): uid is number => typeof uid === "number");
+  return { uids, me: info.me };
+}
+
+async function remoteHealthExec(client: Client, port: number, remoteDir: string): Promise<HttpProbe> {
+  const prefix = envPrefix(remoteDir, port);
+  const py = await exec(client, `${prefix} python3 -`, HEALTH_PY);
+  const probe = parseLastJson<HttpProbe>(py.stdout);
+  if (probe) return probe;
+  return { kind: "blocked", detail: py.stderr.trim() || py.stdout.trim() || `python3 exit ${py.code}` };
+}
+
+async function weOwnListener(client: Client, port: number, remoteDir: string): Promise<boolean> {
+  const info = await listenerInfo(client, port, remoteDir);
+  if (info && info.uids.length > 0) {
+    return info.uids.every((uid) => uid === info.me);
   }
+  const prefix = envPrefix(remoteDir, port);
   const sh = await exec(client, `${prefix} bash -s`, OURS_FALLBACK_SH);
   return /(^|\n)ours\s*$/.test(sh.stdout.trim());
 }
 
-async function probePort(client: Client, port: number, remoteDir: string): Promise<PortKind> {
-  const httpProbe = await remoteHttpGet(client, port, "/api/health");
-  if (httpProbe.kind === "blocked" && /administratively prohibited|forwarding disabled/i.test(httpProbe.detail)) {
-    throw new Error("SSH 服务器禁止端口转发（AllowTcpForwarding）");
+async function probePort(
+  client: Client,
+  port: number,
+  remoteDir: string,
+  logLine: (line: string) => void,
+): Promise<PortKind> {
+  logLine(`探测远端 127.0.0.1:${port}（在 SSH 会话内用 python 访问，不依赖本机端口转发）`);
+  const info = await listenerInfo(client, port, remoteDir);
+  if (info) {
+    logLine(
+      info.uids.length > 0
+        ? `远端 /proc 监听 uid=${info.uids.join(",")}（当前用户 ${info.me}）`
+        : "远端 /proc 上该端口无监听",
+    );
+  } else {
+    logLine("无法读取远端 /proc 监听表，改用 HTTP 探测");
   }
-  if (httpProbe.kind === "refused") return "idle";
-  if (httpProbe.kind === "blocked") {
-    // Port might be open but not HTTP — treat as occupied by something else.
-    return "other_app";
+
+  const httpProbe = await remoteHealthExec(client, port, remoteDir);
+  if (httpProbe.kind === "http") {
+    logLine(`远端 HTTP ${httpProbe.status}`);
+  } else if (httpProbe.kind === "refused") {
+    logLine("远端 HTTP 连接被拒绝（端口空闲）");
+  } else {
+    logLine(`远端 HTTP 探测未完成：${httpProbe.detail}`);
   }
-  const ours = isNpzHealth(httpProbe.status, httpProbe.body);
-  if (!ours) return "other_app";
-  return (await weOwnListener(client, port, remoteDir)) ? "ours" : "other_user";
+
+  const listening = Boolean(info && info.uids.length > 0);
+  const oursHttp = httpProbe.kind === "http" && isNpzHealth(httpProbe.status, httpProbe.body);
+
+  if (!listening) {
+    if (oursHttp) {
+      // WSL mirrored localhost can reach a Windows process that /proc cannot see.
+      logLine("localhost 上已有本应用的健康响应（可能来自 Windows 侧），视为占用");
+      return "other_app";
+    }
+    if (httpProbe.kind === "http") {
+      logLine("localhost 上有其他 HTTP 服务");
+      return "other_app";
+    }
+    // Timeout / blocked / refused with no listener: the port is free in this OS.
+    // SSH forwardOut timeouts used to be mis-labelled as "occupied" (common on
+    // WSL + Windows firewall blocking Node's direct-tcpip channel).
+    return "idle";
+  }
+
+  if (oursHttp) {
+    return (await weOwnListener(client, port, remoteDir)) ? "ours" : "other_user";
+  }
+  return "other_app";
 }
 
 function openTunnel(client: Client, remotePort: number): Promise<{ server: net.Server; localPort: number }> {
@@ -406,6 +488,13 @@ async function attachTunnel(conn: Conn, profile: ServerProfile): Promise<void> {
   const timeout = conn.reused ? 8000 : 25000;
   if (!(await healthCheck(localPort, timeout))) {
     closeTunnel(conn);
+    const remoteDir = await expandRemoteDir(conn.client, profile.remoteDir);
+    const remote = await remoteHealthExec(conn.client, profile.remotePort, remoteDir);
+    if (remote.kind === "http" && isNpzHealth(remote.status, remote.body)) {
+      throw new Error(
+        "远端后端已起来，但本机 SSH 隧道连不上。若连的是 WSL / 127.0.0.1，请在 Windows 防火墙里允许 Node（Defender 拦过「Node Runtime」就会这样），并确认 sshd 开启 AllowTcpForwarding。",
+      );
+    }
     throw new Error("健康检查失败（后端未在远端就绪）");
   }
 }
@@ -426,13 +515,35 @@ async function syncCode(conn: Conn, profile: ServerProfile): Promise<string> {
   return remoteDir;
 }
 
+function venvRequiredError(remoteDir: string): Error {
+  return new Error(
+    [
+      "远端还没有可用的虚拟环境。请 SSH 到该机器，用任意带 pip 的 Python 创建后再连接（不必装系统 python3-venv）：",
+      "",
+      `  <任意python> -m venv ${remoteDir}/.venv`,
+      "",
+      "例如：",
+      `  python3 -m venv ${remoteDir}/.venv`,
+      `  conda create -y -p ${remoteDir}/.venv python=3.13`,
+      `  uv venv --python 3.13 ${remoteDir}/.venv`,
+      "",
+      `残缺目录先删：rm -rf ${remoteDir}/.venv`,
+      `确认：${remoteDir}/.venv/bin/python --version`,
+    ].join("\n"),
+  );
+}
+
 async function startRemote(conn: Conn, remoteDir: string, port: number): Promise<void> {
   if (!conn.client) throw new Error("SSH 未连接");
   log(conn, "远端安装依赖并启动后端…");
-  const result = await exec(conn.client, `${envPrefix(remoteDir, port)} bash -s`, BOOTSTRAP_SH);
-  if (result.stdout) log(conn, result.stdout);
-  if (result.stderr) log(conn, result.stderr);
+  const result = await exec(conn.client, `${envPrefix(remoteDir, port)} bash -s`, BOOTSTRAP_SH, (line) =>
+    log(conn, line),
+  );
   if (result.code !== 0) {
+    const text = `${result.stdout}\n${result.stderr}`;
+    if (result.code === 4 || /NPZVIEW_VENV_REQUIRED/.test(text)) {
+      throw venvRequiredError(remoteDir);
+    }
     throw new Error("远端启动后端失败");
   }
 }
@@ -483,8 +594,19 @@ async function connect(id: string, auth: ConnectAuth): Promise<void> {
     });
     persistAuth(id, auth);
 
+    const fwd = await remoteHttpGet(client, 9, "/", 2500);
+    if (fwd.kind === "blocked" && /administratively prohibited|forwarding disabled/i.test(fwd.detail)) {
+      throw new Error("SSH 服务器禁止端口转发（AllowTcpForwarding）");
+    }
+    if (fwd.kind === "blocked") {
+      log(
+        conn,
+        `SSH 端口转发无响应（${fwd.detail}）。连 WSL 时 Windows 防火墙若拦截了 Node，隧道会失败；占用探测改走远端 python。`,
+      );
+    }
+
     const remoteDir = await syncCode(conn, profile);
-    const kind = await probePort(client, profile.remotePort, remoteDir);
+    const kind = await probePort(client, profile.remotePort, remoteDir, (line) => log(conn, line));
     if (kind === "other_app" || kind === "other_user") {
       throw portConflict(kind, profile.remotePort);
     }

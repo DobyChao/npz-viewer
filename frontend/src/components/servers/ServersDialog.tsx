@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Plug, Power, RefreshCw, Server, Trash2 } from "lucide-react";
 import {
@@ -29,14 +29,64 @@ const EMPTY_FORM: NewServer = {
   host: "",
   user: "",
   port: 22,
-  remoteDir: "~/npz-viewer",
+  remoteDir: "~/.npz-viewer-backend",
   remotePort: 8756,
   authMethod: "agent",
   keyPath: "",
 };
 
+function digitsOrEmpty(raw: string): string | null {
+  if (raw === "" || /^\d{0,5}$/.test(raw)) return raw;
+  return null;
+}
+
+function parsePort(raw: string, fallback: number): number {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 && n <= 65535 ? n : fallback;
+}
+
 function Dot({ className }: { className: string }) {
   return <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${className}`} />;
+}
+
+function ConnLog({
+  lines,
+  open,
+  label,
+}: {
+  lines: string[];
+  open: boolean;
+  label: string;
+}) {
+  const preRef = useRef<HTMLPreElement>(null);
+  const [expanded, setExpanded] = useState(open);
+  useEffect(() => {
+    if (open) setExpanded(true);
+  }, [open]);
+  useEffect(() => {
+    const node = preRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [lines]);
+  if (lines.length === 0 && !open) return null;
+  return (
+    <details
+      open={open || expanded}
+      className="mt-1 pl-5"
+      onToggle={(event) => {
+        if (open) return;
+        const next = (event.target as HTMLDetailsElement).open;
+        if (next !== expanded) setExpanded(next);
+      }}
+    >
+      <summary className="cursor-pointer text-[10px] text-zinc-500 hover:text-zinc-300">{label}</summary>
+      <pre
+        ref={preRef}
+        className="mt-1 max-h-40 overflow-auto rounded bg-zinc-950 p-2 font-mono text-[10px] leading-relaxed text-zinc-400"
+      >
+        {lines.join("\n") || "…"}
+      </pre>
+    </details>
+  );
 }
 
 function AuthFields({
@@ -104,9 +154,12 @@ export function ServersDialog({
   const { data, isLoading } = useQuery({
     queryKey: ["hub-state"],
     queryFn: hub.state,
-    refetchInterval: 2500,
+    refetchInterval: (query) =>
+      query.state.data?.servers.some((server) => server.state === "connecting") ? 400 : 2500,
   });
   const [form, setForm] = useState<NewServer>(EMPTY_FORM);
+  const [sshPortText, setSshPortText] = useState("22");
+  const [backendPortText, setBackendPortText] = useState("8756");
   const [authId, setAuthId] = useState<string | null>(null);
   const [auth, setAuth] = useState<ConnectAuth>({ authMethod: "agent" });
   const [portDraft, setPortDraft] = useState<Record<string, string>>({});
@@ -114,10 +167,17 @@ export function ServersDialog({
   const apply = (next: HubState) => queryClient.setQueryData(["hub-state"], next);
 
   const add = useMutation({
-    mutationFn: () => hub.add(form),
+    mutationFn: () =>
+      hub.add({
+        ...form,
+        port: parsePort(sshPortText, 22),
+        remotePort: parsePort(backendPortText, 8756),
+      }),
     onSuccess: (next) => {
       apply(next);
       setForm(EMPTY_FORM);
+      setSshPortText("22");
+      setBackendPortText("8756");
     },
   });
   const update = useMutation({
@@ -322,13 +382,17 @@ export function ServersDialog({
                   <div className="mt-1.5 flex items-center gap-2 pl-5">
                     <span className="text-[11px] text-zinc-500">后端端口</span>
                     <TextInput
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
                       className="w-24 font-mono"
                       value={portValue}
                       disabled={server.state === "connecting"}
-                      onChange={(event) =>
-                        setPortDraft((draft) => ({ ...draft, [server.id]: event.target.value }))
-                      }
+                      onChange={(event) => {
+                        const next = digitsOrEmpty(event.target.value);
+                        if (next !== null) {
+                          setPortDraft((draft) => ({ ...draft, [server.id]: next }));
+                        }
+                      }}
                       onBlur={() => savePort(server)}
                     />
                   </div>
@@ -362,29 +426,14 @@ export function ServersDialog({
                 {server.state === "error" && server.error && (
                   <div className="mt-1.5 pl-5">
                     <ErrorBox error={new Error(server.error)} compact />
-                    {server.log.length > 0 && (
-                      <details className="mt-1">
-                        <summary className="cursor-pointer text-[10px] text-zinc-500 hover:text-zinc-300">
-                          查看日志
-                        </summary>
-                        <pre className="mt-1 max-h-40 overflow-auto rounded bg-zinc-950 p-2 font-mono text-[10px] leading-relaxed text-zinc-400">
-                          {server.log.join("\n")}
-                        </pre>
-                      </details>
-                    )}
                   </div>
                 )}
 
-                {connected && server.log.length > 0 && (
-                  <details className="mt-1 pl-5">
-                    <summary className="cursor-pointer text-[10px] text-zinc-500 hover:text-zinc-300">
-                      查看日志
-                    </summary>
-                    <pre className="mt-1 max-h-40 overflow-auto rounded bg-zinc-950 p-2 font-mono text-[10px] leading-relaxed text-zinc-400">
-                      {server.log.join("\n")}
-                    </pre>
-                  </details>
-                )}
+                <ConnLog
+                  lines={server.log}
+                  open={server.state === "connecting" || server.state === "error"}
+                  label={server.state === "connecting" ? "正在连接…" : "查看日志"}
+                />
               </div>
             );
           })}
@@ -422,9 +471,14 @@ export function ServersDialog({
             <label className="flex flex-col gap-1">
               <span className="text-[11px] text-zinc-500">SSH 端口</span>
               <TextInput
-                type="number"
-                value={form.port}
-                onChange={(event) => setForm({ ...form, port: Number(event.target.value) })}
+                type="text"
+                inputMode="numeric"
+                value={sshPortText}
+                placeholder="22"
+                onChange={(event) => {
+                  const next = digitsOrEmpty(event.target.value);
+                  if (next !== null) setSshPortText(next);
+                }}
               />
             </label>
             <label className="flex flex-col gap-1">
@@ -438,9 +492,14 @@ export function ServersDialog({
             <label className="flex flex-col gap-1">
               <span className="text-[11px] text-zinc-500">后端端口</span>
               <TextInput
-                type="number"
-                value={form.remotePort}
-                onChange={(event) => setForm({ ...form, remotePort: Number(event.target.value) })}
+                type="text"
+                inputMode="numeric"
+                value={backendPortText}
+                placeholder="8756"
+                onChange={(event) => {
+                  const next = digitsOrEmpty(event.target.value);
+                  if (next !== null) setBackendPortText(next);
+                }}
               />
             </label>
             <label className="flex flex-col gap-1">

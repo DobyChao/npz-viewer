@@ -128,15 +128,17 @@ cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/di
 ## 远程后端（把后端部署到服务器）
 
 数据在服务器上时，可以让后端跑在数据旁边、前端仍留在本机。顶栏点「后端服务器」→「添加服务器」，
-填 SSH 用户名 / 主机 / SSH 端口、远端目录和后端端口，然后点「连接」，在表单里选认证方式：
+填 SSH 用户名 / 主机 / SSH 端口、远端目录和后端端口，然后点「连接」，在表单里选认证方式。远端目录默认是 `~/.npz-viewer-backend`：
 
 - **密码**：本次连接现场输入，只留在本机 Node 进程内存里，连上或失败后即弃，不写 `servers.json`
 - **私钥文件**：填本机密钥路径，可选私钥口令；路径可以记住，密钥内容和口令不落盘
 - **ssh-agent**：沿用本机已有的免密环境
 
-连接时会：用 SFTP 按 mtime/size 增量同步后端代码 → 探测远端 `127.0.0.1:<后端端口>` → 建立 SSH
+连接时会：用 SFTP 按 mtime/size 增量同步 **`backend/app` 和 `requirements.txt`**（测试、文档、`.cursor` 等不会上传）→ 在 SSH 会话里探测远端 `127.0.0.1:<后端端口>` → 建立 SSH
 隧道（本机 `net.Server` + `forwardOut`，等效 `ssh -L`）→ 健康检查。`/api` 随后转到所选后端，
 **原始 npz 不过网，只有渲染好的图和 JSON 回传**。已连接的服务器之间点「使用」切换，不用再输凭据。
+
+连本机 WSL（`127.0.0.1:22`）时，占用探测走远端 python，不依赖 Windows 侧 SSH 端口转发。若 Defender 拦过 Node Runtime，请在防火墙里允许它，否则隧道（`direct-tcpip`）会失败，看起来像「怎么改端口都被占用」。
 
 远端端口冲突按占用者区分（端口是整机一份，改的是「后端端口」不是 SSH 端口）：
 
@@ -144,7 +146,7 @@ cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/di
 2. 本 SSH 用户已有健康的本应用 → **复用**，只接隧道；「停止」只关隧道。需要新代码时点「重启后端」
 3. 其他程序占着，或其他用户的 npz-viewer 占着 → 报错，请改后端端口。不会 kill 不认识的进程
 
-要求：服务器上有 `python3`（3.13+ 才能用视频导出）。每台服务器有各自的 `roots.json` 和缓存。
+要求：远端目录里要有 `.venv`（首次连接会尝试用系统 `python3 -m venv` 创建）。若系统 Python 缺 ensurepip，界面会提示你 SSH 上去用任意带 pip 的 Python 自行创建（conda / uv / 自己编译的均可），不必装 `python3-venv`。后端需要 Python 3.13+ 才能用视频导出。每台服务器有各自的 `roots.json` 和缓存。
 服务器列表存在本机的 `servers.json`（已 gitignore），只含 host/user/端口/目录/认证方式/可选密钥路径。
 
 实现在本机 Node 里（`frontend/hub/`，`ssh2`）：`/__hub/*` 是管理接口，`/api/*` 被动态反代到当前后端。

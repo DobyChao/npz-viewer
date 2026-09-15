@@ -115,31 +115,38 @@ function enableEmbeddableSite(pythonDir) {
 function windowsBuildEnv() {
   const home = process.env.USERPROFILE || process.env.HOME || "";
   const tools = join(home, ".rustup", "toolchains");
+  const complete = [];
   const cargoOnly = [];
-  const rest = [];
   if (existsSync(tools)) {
     for (const name of readdirSync(tools)) {
       const bin = join(tools, name, "bin");
       const cargo = existsSync(join(bin, "cargo.exe"));
       const rustc = existsSync(join(bin, "rustc.exe"));
-      if (cargo && !rustc) cargoOnly.push(bin);
-      else if (cargo || rustc) rest.push(bin);
+      if (cargo && rustc) complete.push(bin);
+      else if (cargo) cargoOnly.push(bin);
     }
   }
-  return {
-    PATH: [...cargoOnly, ...rest, process.env.PATH ?? ""].join(";"),
+  // Windows App Control (error 4551) can block some toolchain cargo.exe (here:
+  // stable) while allowing an older cargo-only dir. Pair a runnable cargo with
+  // a toolchain that still has rustc+std.
+  const rustcDir = complete[0];
+  const cargoDir = cargoOnly[0] ?? complete[0];
+  const env = {
+    PATH: [cargoDir, rustcDir, process.env.PATH ?? ""].filter(Boolean).join(";"),
     CARGO_TARGET_DIR: join(FRONTEND, "src-tauri", "target"),
   };
+  if (cargoDir) env.CARGO = join(cargoDir, "cargo.exe");
+  if (rustcDir) env.RUSTC = join(rustcDir, "rustc.exe");
+  return env;
 }
 function findExe(targetDir) {
   const candidates = [
     join(targetDir, "release", "npz-view.exe"),
     join(FRONTEND, "src-tauri", "target", "release", "npz-view.exe"),
     join(FRONTEND, "src-tauri", "target", "x86_64-pc-windows-msvc", "release", "npz-view.exe"),
+    join(DIST_PORTABLE, STAGE_NAME, "npz-view.exe"),
   ];
-  const found = candidates.find((file) => existsSync(file));
-  if (!found) die(`npz-view.exe not found after tauri build (looked in ${candidates.join(", ")})`);
-  return found;
+  return candidates.find((file) => existsSync(file)) ?? null;
 }
 
 async function main() {
@@ -150,7 +157,11 @@ async function main() {
   mkdirSync(CACHE, { recursive: true });
   mkdirSync(DIST_PORTABLE, { recursive: true });
 
-  run("npm", ["install"], FRONTEND);
+  if (!existsSync(join(FRONTEND, "node_modules", "vite"))) {
+    run("npm", ["install"], FRONTEND);
+  } else {
+    console.log("reusing frontend/node_modules");
+  }
   run("npm", ["run", "build"], FRONTEND);
 
   const hubOut = join(CACHE, "hub-server.mjs");
@@ -240,14 +251,21 @@ async function main() {
   }
 
   const buildEnv = windowsBuildEnv();
-  run("npx", ["tauri", "build", "--no-bundle"], FRONTEND, { env: buildEnv });
+  let exe = findExe(buildEnv.CARGO_TARGET_DIR);
+  if (exe && !process.env.NPZVIEW_FORCE_TAURI) {
+    console.log(`reusing ${exe}（窗口壳未改；设 NPZVIEW_FORCE_TAURI=1 可强制重编）`);
+  } else {
+    run("npx", ["tauri", "build", "--no-bundle"], FRONTEND, { env: buildEnv });
+    exe = findExe(buildEnv.CARGO_TARGET_DIR);
+    if (!exe) die("npz-view.exe not found after tauri build");
+  }
 
   rmSync(STAGE, { recursive: true, force: true });
   mkdirSync(join(STAGE, "scripts"), { recursive: true });
   mkdirSync(join(STAGE, "runtime", "node"), { recursive: true });
   mkdirSync(join(STAGE, "frontend", "dist"), { recursive: true });
 
-  copyFileSync(findExe(buildEnv.CARGO_TARGET_DIR), join(STAGE, "npz-view.exe"));
+  copyFileSync(exe, join(STAGE, "npz-view.exe"));
   copyFileSync(join(ROOT, "scripts", "npz-view.mjs"), join(STAGE, "scripts", "npz-view.mjs"));
   copyFileSync(hubOut, join(STAGE, "scripts", "hub-server.mjs"));
   copyFileSync(nodeExeSrc, join(STAGE, "runtime", "node", "node.exe"));

@@ -1,11 +1,12 @@
-// Incremental SFTP mirror of the repo onto a remote directory.
-// Compares size + mtime (seconds) like rsync; skips excluded paths and never
-// touches remote-only state (.venv, roots.json, pidfiles, …).
-import { readdirSync, statSync } from "node:fs";
+// Incremental SFTP deploy: only the Python backend package plus requirements.txt.
+// Compares size + mtime (seconds) like rsync. Never touches remote-only state
+// (.venv, roots.json, pidfiles, …). Leftover non-deploy files from older clients
+// are deleted on the next sync.
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, posix, relative, sep } from "node:path";
 import type { Callback, FileEntryWithStats, SFTPWrapper, Stats } from "ssh2";
 
-const EXCLUDE_NAMES = new Set([
+const PROTECTED_NAMES = new Set([
   ".git",
   ".venv",
   "frontend",
@@ -29,15 +30,22 @@ export interface SyncStats {
   deleted: number;
 }
 
-function excludedName(name: string): boolean {
-  if (EXCLUDE_NAMES.has(name)) return true;
+function protectedName(name: string): boolean {
+  if (PROTECTED_NAMES.has(name)) return true;
   if (name.startsWith(".npzview-backend")) return true;
   if (name.endsWith(".pyc")) return true;
   return false;
 }
 
 export function shouldExclude(relativePath: string): boolean {
-  return relativePath.split(/[/\\]/).filter(Boolean).some(excludedName);
+  return relativePath.split(/[/\\]/).filter(Boolean).some(protectedName);
+}
+
+export function isDeployPath(relativePath: string): boolean {
+  const parts = relativePath.split(/[/\\]/).filter(Boolean);
+  if (parts.some(protectedName)) return false;
+  if (parts.length === 1 && parts[0] === "requirements.txt") return true;
+  return parts[0] === "backend" && parts[1] === "app";
 }
 
 function toPosix(relativePath: string): string {
@@ -83,24 +91,29 @@ export async function mkdirp(sftp: SFTPWrapper, dir: string): Promise<void> {
 
 function listLocalFiles(root: string): { relative: string; local: string; size: number; mtimeSec: number }[] {
   const out: { relative: string; local: string; size: number; mtimeSec: number }[] = [];
+  const addFile = (full: string) => {
+    const rel = toPosix(relative(root, full));
+    if (!isDeployPath(rel)) return;
+    const st = statSync(full);
+    out.push({
+      relative: rel,
+      local: full,
+      size: st.size,
+      mtimeSec: Math.floor(st.mtimeMs / 1000),
+    });
+  };
   const walk = (dir: string) => {
+    if (!existsSync(dir)) return;
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (excludedName(entry.name)) continue;
+      if (protectedName(entry.name)) continue;
       const full = join(dir, entry.name);
-      const rel = toPosix(relative(root, full));
       if (entry.isDirectory()) walk(full);
-      else if (entry.isFile()) {
-        const st = statSync(full);
-        out.push({
-          relative: rel,
-          local: full,
-          size: st.size,
-          mtimeSec: Math.floor(st.mtimeMs / 1000),
-        });
-      }
+      else if (entry.isFile()) addFile(full);
     }
   };
-  walk(root);
+  const requirements = join(root, "requirements.txt");
+  if (existsSync(requirements)) addFile(requirements);
+  walk(join(root, "backend", "app"));
   return out;
 }
 
@@ -118,7 +131,7 @@ async function listRemoteFiles(
     }
     for (const entry of entries) {
       if (entry.filename === "." || entry.filename === "..") continue;
-      if (excludedName(entry.filename)) continue;
+      if (protectedName(entry.filename)) continue;
       const childRel = rel ? posix.join(rel, entry.filename) : entry.filename;
       const childPath = posix.join(dir, entry.filename);
       const isDir = entry.attrs.isDirectory();
@@ -175,6 +188,7 @@ export async function mirror(
         await call((cb) => sftp.unlink(entry.remote, cb));
       }
       stats.deleted += 1;
+      log?.(`删除 ${entry.relative}`);
     } catch {
       // Non-empty dir or already gone — ignore.
     }

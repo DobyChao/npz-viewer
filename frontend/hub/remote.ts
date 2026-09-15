@@ -2,7 +2,7 @@
 // Paths and ports are passed via NPZVIEW_DIR / NPZVIEW_PORT env (JSON-quoted).
 
 export function envPrefix(remoteDir: string, remotePort: number): string {
-  return `NPZVIEW_DIR=${JSON.stringify(remoteDir)} NPZVIEW_PORT=${Number(remotePort)}`;
+  return `PYTHONUNBUFFERED=1 NPZVIEW_DIR=${JSON.stringify(remoteDir)} NPZVIEW_PORT=${Number(remotePort)}`;
 }
 
 export function sessionName(port: number): string {
@@ -27,6 +27,22 @@ for table in ("/proc/net/tcp", "/proc/net/tcp6"):
     except FileNotFoundError:
         continue
 print(json.dumps({"uids": uids, "me": os.getuid()}))
+`;
+
+export const HEALTH_PY = `import json, os, urllib.error, urllib.request
+port = int(os.environ["NPZVIEW_PORT"])
+url = "http://127.0.0.1:%d/api/health" % port
+try:
+    with urllib.request.urlopen(url, timeout=2.5) as resp:
+        body = resp.read().decode("utf-8", "replace")
+        print(json.dumps({"kind": "http", "status": int(resp.status), "body": body[:4000]}))
+except urllib.error.HTTPError as err:
+    body = err.read().decode("utf-8", "replace")
+    print(json.dumps({"kind": "http", "status": int(err.code), "body": body[:4000]}))
+except Exception as err:
+    msg = str(err)
+    refused = isinstance(err, ConnectionRefusedError) or "111" in msg or "10061" in msg or "refused" in msg.lower()
+    print(json.dumps({"kind": "refused" if refused else "blocked", "detail": msg}))
 `;
 
 export const KILL_OURS_PY = `import json, os, signal
@@ -113,21 +129,57 @@ case "$($PY -c 'import sys;print(sys.version_info[1])')" in
   1[3-9]) : ;;
   *) echo "警告: 远端 Python < 3.13，视频导出会失败" ;;
 esac
-if [ ! -x .venv/bin/python ]; then
-  "$PY" -m venv .venv || { echo "创建 venv 失败，远端可能缺少 python venv 包"; exit 4; }
+venv_py() {
+  if [ -x .venv/bin/python ]; then echo .venv/bin/python
+  elif [ -x .venv/bin/python3 ]; then echo .venv/bin/python3
+  else echo ""
+  fi
+}
+print_venv_help() {
+  echo "NPZVIEW_VENV_REQUIRED"
+  echo "远端还没有可用的虚拟环境（需要 $NPZVIEW_DIR/.venv/bin/python）。"
+  echo "系统 python3 -m venv 经常缺 ensurepip，不必 apt 装 python3-venv。"
+  echo "请 SSH 到这台机器，用你手头任意带 pip 的 Python 自行创建，然后回到本界面再点「连接」："
+  echo "  <任意python> -m venv $NPZVIEW_DIR/.venv"
+  echo "例如："
+  echo "  python3 -m venv $NPZVIEW_DIR/.venv"
+  echo "  conda create -y -p $NPZVIEW_DIR/.venv python=3.13"
+  echo "  uv venv --python 3.13 $NPZVIEW_DIR/.venv"
+  echo "若已有残缺的 .venv，先删掉再建："
+  echo "  rm -rf $NPZVIEW_DIR/.venv"
+  echo "建好后确认："
+  echo "  $NPZVIEW_DIR/.venv/bin/python --version"
+}
+VENV_PY="$(venv_py)"
+if [ -z "$VENV_PY" ]; then
+  echo "创建 venv…"
+  if ! "$PY" -m venv .venv; then
+    print_venv_help
+    exit 4
+  fi
+  VENV_PY="$(venv_py)"
 fi
-.venv/bin/python -m pip install -q --upgrade pip
-.venv/bin/pip install -q -r requirements.txt
+[ -n "$VENV_PY" ] || { print_venv_help; exit 4; }
+echo "使用 $VENV_PY ($("$VENV_PY" --version 2>&1))"
+if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+  echo "已有 .venv，但这个解释器没有 pip。"
+  print_venv_help
+  exit 4
+fi
+echo "安装 Python 依赖…"
+"$VENV_PY" -m pip install --upgrade pip
+"$VENV_PY" -m pip install -r requirements.txt
+echo "启动后端…"
 if command -v tmux >/dev/null 2>&1; then
   tmux kill-session -t "$SESSION" 2>/dev/null || true
-  tmux new-session -d -s "$SESSION" "cd '$(pwd)/backend' && '$(pwd)/.venv/bin/python' -m app.main --host 127.0.0.1 --port $PORT"
+  tmux new-session -d -s "$SESSION" "cd '$(pwd)/backend' && '$(pwd)/$VENV_PY' -m app.main --host 127.0.0.1 --port $PORT"
   echo "backend started via tmux on 127.0.0.1:$PORT session=$SESSION"
 else
   if [ -f "$PIDFILE" ]; then
     kill "$(cat "$PIDFILE")" 2>/dev/null || true
   fi
   cd backend
-  nohup ../.venv/bin/python -m app.main --host 127.0.0.1 --port "$PORT" > "../$LOGFILE" 2>&1 &
+  nohup "../$VENV_PY" -m app.main --host 127.0.0.1 --port "$PORT" > "../$LOGFILE" 2>&1 &
   echo $! > "../$PIDFILE"
   echo "backend started via nohup (pid $(cat "../$PIDFILE")) on 127.0.0.1:$PORT"
 fi
