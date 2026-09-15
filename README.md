@@ -14,6 +14,8 @@ linear RGB 图、gainmap、mask、特征图和一些小矩阵，需要快速看�
 - Python 3.11+（开发验证于 3.14）
 - Node.js `^20.19.0 || >=22.12.0`（Vite 8 的要求，已写进 `frontend/package.json` 的 `engines`；
   开发验证于 24）
+- 桌面窗口（`npm run tauri:dev` / `tauri:build`）：Rust 1.85+，以及系统 WebView
+  （Linux：`libwebkit2gtk-4.1-dev` `libgtk-3-dev`）
 
 `typecheck` 脚本直接调用 `node node_modules/typescript/lib/tsc.js` 而不是 `tsc`，这是刻意的：
 typescript 7 的 `bin/tsc` 是个**没有扩展名**的 ESM 文件，只有较新的 Node 能把它当入口执行，稍旧的
@@ -55,14 +57,58 @@ cd frontend && npm install && npm run dev
 这个文件可以在前端顶栏的「管理 root」里增删，也可以直接用编辑器改 —— 后端按 mtime 热加载，
 不用重启。Windows 和 Linux 都用正斜杠写绝对路径。
 
-### 生产模式（单进程）
+### 本机客户端（Tauri）
+
+这个分支按**桌面客户端**迭代。浏览器不能 SSH；窗口是 Tauri（系统 WebView，不是 Electron 自带的 Chrome），SSH 仍是本机 Node `ssh2` hub。
+
+开发（热更新 + 同一套 hub）：
+
+```bash
+cd frontend && npm install
+npm run tauri:dev
+```
+
+会起 Vite `:5273`，再打开原生窗口。顶栏「后端服务器」可用。
+
+#### Windows 便携 zip（解压即用）
+
+在 64 位 Windows 上（需 Node、Rust、本机 WebView2）：
+
+```bash
+cd frontend && npm install
+npm run pack:windows
+```
+
+产物是 `dist-portable/npz-view-0.1.0-windows-x64.zip`。解压到普通文件夹，双击 `npz-view.exe`。zip 里已带 Node、embeddable Python 和前端 dist，**不需要**再装 Node / Python，也**不要**放到 Program Files。本机只需 Windows 自带的 WebView2。打不开时看同目录 `npz-view-hub.log`。
+
+源码直接打 exe（迭代用，仍要本机 Node / Python / 这份仓库）：
+
+```bash
+cd frontend && npm run build
+npm run tauri:build
+```
+
+Windows x64 交叉编译（Linux 上）仍可用 `npm run tauri:build:windows`；那个 NSIS `setup.exe` 会装到 Program Files，便携布局对不上，请用上面的 zip。
+
+发布版启动时会拉起 `scripts/npz-view.mjs`（便携版用自带 Python + 自带 hub；源码运行则用本机 Python + vite preview）。窗口打开 `http://127.0.0.1:5273`。退出窗口会停掉这层壳。Windows 上 Node 日志写在客户端目录的 `npz-view-hub.log`。
+
+只要页面、不要窗口时仍可用：
+
+```bash
+node scripts/npz-view.mjs
+```
+
+### 服务器单进程（无本机 SSH 切换）
+
+数据已经在这台机器上、别人用浏览器直接打开时，仍然可以只跑 Python：
 
 ```bash
 cd frontend && npm run build
 cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/dist
 ```
 
-此时后端同时提供 API 和前端静态文件，只需要访问 http://127.0.0.1:8756 一个地址。
+此时访问 http://127.0.0.1:8756 一个地址。没有 Node，也就没有 UI 里「连另一台机器」的能力——
+那是上面「本机客户端」的事。
 
 ### 常用启动参数
 
@@ -78,6 +124,34 @@ cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/di
 | `--static-dir` | 无 | 指定后托管前端构建产物 |
 
 所有参数也可以用 `NPZVIEW_` 前缀的环境变量设置，例如 `NPZVIEW_PORT=9000`。
+
+## 远程后端（把后端部署到服务器）
+
+数据在服务器上时，可以让后端跑在数据旁边、前端仍留在本机。顶栏点「后端服务器」→「添加服务器」，
+填 SSH 用户名 / 主机 / SSH 端口、远端目录和后端端口，然后点「连接」，在表单里选认证方式。远端目录默认是 `~/.npz-viewer-backend`：
+
+- **密码**：本次连接现场输入，只留在本机 Node 进程内存里，连上或失败后即弃，不写 `servers.json`
+- **私钥文件**：填本机密钥路径，可选私钥口令；路径可以记住，密钥内容和口令不落盘
+- **ssh-agent**：沿用本机已有的免密环境
+
+连接时会：用 SFTP 按 mtime/size 增量同步 **`backend/app` 和 `requirements.txt`**（测试、文档、`.cursor` 等不会上传）→ 在 SSH 会话里探测远端 `127.0.0.1:<后端端口>` → 建立 SSH
+隧道（本机 `net.Server` + `forwardOut`，等效 `ssh -L`）→ 健康检查。`/api` 随后转到所选后端，
+**原始 npz 不过网，只有渲染好的图和 JSON 回传**。已连接的服务器之间点「使用」切换，不用再输凭据。
+
+连本机 WSL（`127.0.0.1:22`）时，占用探测走远端 python，不依赖 Windows 侧 SSH 端口转发。若 Defender 拦过 Node Runtime，请在防火墙里允许它，否则隧道（`direct-tcpip`）会失败，看起来像「怎么改端口都被占用」。
+
+远端端口冲突按占用者区分（端口是整机一份，改的是「后端端口」不是 SSH 端口）：
+
+1. 空闲 → 部署并启动（tmux session / pidfile 带端口，`npzview-backend-<port>`）
+2. 本 SSH 用户已有健康的本应用 → **复用**，只接隧道；「停止」只关隧道。需要新代码时点「重启后端」
+3. 其他程序占着，或其他用户的 npz-viewer 占着 → 报错，请改后端端口。不会 kill 不认识的进程
+
+要求：远端目录里要有 `.venv`（首次连接会尝试用系统 `python3 -m venv` 创建）。若系统 Python 缺 ensurepip，界面会提示你 SSH 上去用任意带 pip 的 Python 自行创建（conda / uv / 自己编译的均可），不必装 `python3-venv`。后端需要 Python 3.13+ 才能用视频导出。每台服务器有各自的 `roots.json` 和缓存。
+服务器列表存在本机的 `servers.json`（已 gitignore），只含 host/user/端口/目录/认证方式/可选密钥路径。
+
+实现在本机 Node 里（`frontend/hub/`，`ssh2`）：`/__hub/*` 是管理接口，`/api/*` 被动态反代到当前后端。
+桌面窗口是 Tauri（`npm run tauri:dev`）。不要窗口时用 `node scripts/npz-view.mjs`。纯 Python
+`--static-dir` 单进程没有这层 Node，不能从 UI 发起 SSH。
 
 ## 渲染规则
 

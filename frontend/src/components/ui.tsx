@@ -275,7 +275,7 @@ export function ErrorBox({
     >
       <AlertTriangle size={compact ? 12 : 14} className="mt-0.5 shrink-0" />
       <div className="min-w-0">
-        <div className="break-words">{message}</div>
+        <div className="break-words whitespace-pre-wrap">{message}</div>
         {hint && <div className="mt-1 text-red-400/70">{hint}</div>}
       </div>
     </div>
@@ -301,6 +301,8 @@ export function Modal({
   children: ReactNode;
   width?: string;
 }) {
+  const closeOnBackdrop = useRef(false);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -312,14 +314,19 @@ export function Modal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-hidden bg-black/60 p-10"
-      onClick={onClose}
+      onMouseDown={(event) => {
+        closeOnBackdrop.current = event.target === event.currentTarget;
+      }}
+      onClick={(event) => {
+        if (closeOnBackdrop.current && event.target === event.currentTarget) onClose();
+        closeOnBackdrop.current = false;
+      }}
     >
       <div
         className={clsx(
           "flex max-h-[calc(100dvh-5rem)] min-h-0 w-full flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl",
           width,
         )}
-        onClick={(event) => event.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-2.5">
           <h2 className="text-sm font-medium text-zinc-200">{title}</h2>

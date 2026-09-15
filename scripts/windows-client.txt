@@ -1,0 +1,11 @@
+npz 浏览器 — Windows x64 便携版
+
+解压到任意普通文件夹（不要放到 Program Files），双击 npz-view.exe。
+
+本机只需要 Windows 10/11 自带的 WebView2（一般都有）。
+不需要再装 Node、Python，也不需要 clone 仓库。
+
+第一次打开后，在顶栏「管理 root」里加上你的 npz 目录。
+「后端服务器」可以 SSH 连远程（密码 / 密钥 / ssh-agent）。
+
+关掉窗口会停掉本机后端。若打不开，看同目录下的 npz-view-hub.log。
