@@ -11,13 +11,16 @@ export default defineConfig({
   server: {
     // Bind IPv4 explicitly: resolving "localhost" picks ::1 on Windows, which
     // leaves http://127.0.0.1 refusing connections.
+    // Dev (`npm run dev` / `tauri:dev`) stays on 5273 unless NPZVIEW_DEV_PORT is set.
     host: "127.0.0.1",
     port: Number(process.env.NPZVIEW_DEV_PORT ?? 5273),
     strictPort: true,
   },
   preview: {
     host: "127.0.0.1",
-    port: Number(process.env.NPZVIEW_DEV_PORT ?? 5273),
+    // Packaged / `npz-view.mjs` pass NPZVIEW_UI_PORT (ephemeral). Direct
+    // `npm run preview` without env still uses the dev default.
+    port: Number(process.env.NPZVIEW_UI_PORT ?? process.env.NPZVIEW_DEV_PORT ?? 5273),
     strictPort: true,
   },
   build: {

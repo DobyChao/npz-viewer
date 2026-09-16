@@ -46,6 +46,11 @@ export function TopBar() {
   const roots: RootInfo[] = data?.roots ?? [];
   const activeRoot = roots.find((root) => root.id === rootId) ?? null;
 
+  useEffect(() => {
+    const rootName = activeRoot?.name ?? "";
+    document.title = rootName ? `${backendLabel} · ${rootName}` : backendLabel;
+  }, [backendLabel, activeRoot]);
+
   // Fall back to the first root when nothing is chosen or the persisted one disappeared.
   useEffect(() => {
     if (roots.length === 0) return;

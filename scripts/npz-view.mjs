@@ -5,6 +5,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import http from "node:http";
+import net from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,7 +14,6 @@ const FRONTEND = resolve(ROOT, "frontend");
 const DIST = resolve(FRONTEND, "dist", "index.html");
 const HUB_SERVER = resolve(ROOT, "scripts", "hub-server.mjs");
 const BACKEND_PORT = Number(process.env.NPZVIEW_BACKEND_PORT ?? 8756);
-const UI_PORT = Number(process.env.NPZVIEW_DEV_PORT ?? 5273);
 const SKIP_LOCAL = process.env.NPZVIEW_NO_LOCAL_BACKEND === "1";
 const BUNDLED_NODE_WIN = resolve(ROOT, "runtime", "node", "node.exe");
 const BUNDLED_NODE_POSIX = resolve(ROOT, "runtime", "node", "bin", "node");
@@ -23,6 +23,32 @@ const PORTABLE =
   existsSync(BUNDLED_NODE_POSIX);
 
 const children = [];
+
+function requestedUiPort() {
+  const ui = Number(process.env.NPZVIEW_UI_PORT);
+  if (Number.isInteger(ui) && ui >= 0) return ui;
+  const dev = Number(process.env.NPZVIEW_DEV_PORT);
+  if (Number.isInteger(dev) && dev > 0) return dev;
+  return 0;
+}
+
+function pickFreePort() {
+  return new Promise((resolvePort, rejectPort) => {
+    const server = net.createServer();
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      server.close((err) => (err ? rejectPort(err) : resolvePort(port)));
+    });
+    server.on("error", rejectPort);
+  });
+}
+
+async function resolveUiPort() {
+  const requested = requestedUiPort();
+  if (requested > 0) return requested;
+  return pickFreePort();
+}
 
 function pythonBin() {
   const bundledWin = resolve(ROOT, "runtime", "python", "python.exe");
@@ -67,7 +93,6 @@ function withRuntimePath(extraEnv = {}) {
     PATH: path,
     NPZVIEW_ROOT: ROOT,
     NPZVIEW_DIST: resolve(FRONTEND, "dist"),
-    NPZVIEW_DEV_PORT: String(UI_PORT),
     NPZVIEW_BACKEND_PORT: String(BACKEND_PORT),
     PYTHONUTF8: "1",
     PYTHONNOUSERSITE: "1",
@@ -132,6 +157,9 @@ process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
 async function main() {
+  const uiPort = await resolveUiPort();
+  const hubEnv = { NPZVIEW_UI_PORT: String(uiPort), NPZVIEW_DEV_PORT: String(uiPort) };
+
   if (!existsSync(DIST)) {
     if (PORTABLE) {
       throw new Error(`便携版缺少前端产物: ${DIST}`);
@@ -175,17 +203,17 @@ async function main() {
     }
   }
 
-  console.log(`starting UI + SSH hub on http://127.0.0.1:${UI_PORT}`);
+  console.log(`starting UI + SSH hub on http://127.0.0.1:${uiPort}`);
   if (PORTABLE) {
     if (!existsSync(HUB_SERVER)) {
       throw new Error(`便携版缺少 ${HUB_SERVER}`);
     }
-    run(nodeBin(), [HUB_SERVER], FRONTEND);
+    run(nodeBin(), [HUB_SERVER], FRONTEND, hubEnv);
   } else {
-    run(npmCmd(), ["run", "preview"], FRONTEND);
+    run(npmCmd(), ["run", "preview"], FRONTEND, hubEnv);
   }
-  await waitHttp(UI_PORT, "/__hub/state", 20000);
-  console.log(`npz-view ready  →  http://127.0.0.1:${UI_PORT}`);
+  await waitHttp(uiPort, "/__hub/state", 20000);
+  console.log(`npz-view ready  →  http://127.0.0.1:${uiPort}`);
 }
 
 main().catch((err) => {

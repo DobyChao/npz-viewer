@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>tabs</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #18181b;
+        color: #e4e4e7;
+        font: 12px/1.2 system-ui, "Segoe UI", sans-serif;
+        user-select: none;
+        overflow: hidden;
+      }
+      #bar {
+        display: flex;
+        align-items: stretch;
+        height: 100%;
+        border-bottom: 1px solid #27272a;
+      }
+      #tabs {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        overflow-x: auto;
+      }
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 220px;
+        min-width: 88px;
+        padding: 0 8px 0 12px;
+        border-right: 1px solid #27272a;
+        color: #a1a1aa;
+        background: transparent;
+        cursor: pointer;
+      }
+      .tab.active {
+        color: #fafafa;
+        background: #27272a;
+      }
+      .tab span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+      }
+      .tab button {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: #71717a;
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+      }
+      .tab button:hover,
+      #new:hover {
+        background: #3f3f46;
+        color: #fafafa;
+      }
+      #new {
+        appearance: none;
+        border: 0;
+        width: 36px;
+        background: transparent;
+        color: #a1a1aa;
+        font-size: 18px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <div id="tabs"></div>
+      <button id="new" title="新建标签">+</button>
+    </div>
+    <script>
+      async function ready() {
+        while (!window.__TAURI__) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        const invoke = window.__TAURI__.core.invoke.bind(window.__TAURI__.core);
+        const listen = window.__TAURI__.event.listen.bind(window.__TAURI__.event);
+        const root = document.getElementById("tabs");
+        const neu = document.getElementById("new");
+
+        function render(tabs) {
+          root.replaceChildren();
+          for (const tab of tabs) {
+            const el = document.createElement("div");
+            el.className = "tab" + (tab.active ? " active" : "");
+            el.title = tab.title;
+            const label = document.createElement("span");
+            label.textContent = tab.title || "标签";
+            const close = document.createElement("button");
+            close.type = "button";
+            close.title = "关闭";
+            close.textContent = "×";
+            close.addEventListener("click", (event) => {
+              event.stopPropagation();
+              invoke("tab_close", { id: tab.id }).then(render).catch(console.error);
+            });
+            el.append(label, close);
+            el.addEventListener("click", () => {
+              invoke("tab_switch", { id: tab.id }).then(render).catch(console.error);
+            });
+            root.append(el);
+          }
+        }
+
+        let creating = false;
+        neu.addEventListener("click", () => {
+          if (creating) return;
+          creating = true;
+          neu.disabled = true;
+          invoke("tab_new")
+            .then(render)
+            .catch((err) => alert(String(err)))
+            .finally(() => {
+              creating = false;
+              neu.disabled = false;
+            });
+        });
+        await listen("tabs-changed", (event) => render(event.payload));
+        render(await invoke("tab_list"));
+      }
+      ready();
+    </script>
+  </body>
+</html>

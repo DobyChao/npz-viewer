@@ -55,6 +55,7 @@
 - 所有分栏使用 `react-resizable-panels`，尺寸持久化到 localStorage。
 - ComparePanel 有三态：`hidden` / `split`（与 Gallery 上下分栏）/ `full`（占满整个右侧区域，Gallery 隐藏）。
 - 左栏上下两块也可拖拽调整比例。
+- 桌面客户端（Tauri）在窗口顶部另有**原生标签栏**：每个标签一个独立 WebView，URL 带 `?session=`，各自选择本机或已连接的远端后端。浏览器 / `npm run dev` 仍是单页。发布壳的 UI 端口由客户端临时分配，不固定 5273。
 
 ---
 
@@ -547,3 +548,4 @@ confirm_large, save_dir?, viewport?: {scale,x,y,tile_width,tile_height,natural_s
 | 2026-08-29 | 对比格可重排；算子/覆盖按 (路径, key) 跟随 | 文件内只用 key；操作数下拉在重名时带文件提示 |
 | 2026-09-01 | 序列播放 render URL 带 live `v=`；无 `v=` 不标 immutable | 文件改写后对比 video 仍命中旧 HTTP / imageCache |
 | 2026-09-01 | 拖 scrubber 等到目标帧就绪才换图 | 拖过预取窗口会先闪中间缓存帧再跳到目标 |
+| 2026-09-15 | 桌面客户端原生多 WebView 标签，每标签独立 hub session / 后端；发布壳 UI 端口临时分配 | 多远端并行对比；避免固定占用 5273 |

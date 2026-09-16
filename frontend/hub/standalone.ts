@@ -4,11 +4,18 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import http from "node:http";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { manager } from "./manager.ts";
-import { handleHub, proxyApi, type HubReq } from "./plugin.ts";
+import { handleHub, proxyApi, sessionFromRequest, type HubReq } from "./plugin.ts";
 
 const HOST = "127.0.0.1";
-const PORT = Number(process.env.NPZVIEW_DEV_PORT ?? 5273);
 const DIST = resolve(process.env.NPZVIEW_DIST ?? resolve(process.cwd(), "dist"));
+
+function requestedPort(): number {
+  const ui = Number(process.env.NPZVIEW_UI_PORT);
+  if (Number.isInteger(ui) && ui >= 0) return ui;
+  const dev = Number(process.env.NPZVIEW_DEV_PORT);
+  if (Number.isInteger(dev) && dev > 0) return dev;
+  return 0;
+}
 
 const MIME: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -82,7 +89,7 @@ function onRequest(req: HubReq, res: http.ServerResponse): void {
     return;
   }
   if (path === "/api" || path.startsWith("/api/")) {
-    proxyApi(req, res, manager.activeTarget());
+    proxyApi(req, res, manager.activeTarget(sessionFromRequest(req)));
     return;
   }
   serveStatic(req, res);
@@ -94,8 +101,10 @@ if (!existsSync(join(DIST, "index.html"))) {
 }
 
 const server = http.createServer((req, res) => onRequest(req as HubReq, res));
-server.listen(PORT, HOST, () => {
-  console.log(`UI + SSH hub on http://${HOST}:${PORT}`);
+server.listen(requestedPort(), HOST, () => {
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : requestedPort();
+  console.log(`UI + SSH hub on http://${HOST}:${port}`);
 });
 server.on("close", () => manager.shutdown());
 

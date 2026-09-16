@@ -52,9 +52,11 @@ export interface HubServerView extends ServerProfile {
 }
 
 export interface HubState {
-  active: string; // "local" or a server id
+  active: string; // "local" or a server id for the requesting session
   localActive: boolean;
   servers: HubServerView[];
+  sessionId: string;
+  sessions: Record<string, string>;
 }
 
 export interface Target {
@@ -69,7 +71,53 @@ const LOCAL_BACKEND: Target = {
 };
 
 const conns = new Map<string, Conn>();
-let active = "local";
+export const DEFAULT_SESSION = "default";
+const sessions = new Map<string, string>([[DEFAULT_SESSION, "local"]]);
+
+function newSessionId(): string {
+  return `s_${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
+function ensureSession(id: string): string {
+  const sid = id.trim() || DEFAULT_SESSION;
+  if (!sessions.has(sid)) sessions.set(sid, "local");
+  return sid;
+}
+
+function sessionTarget(sessionId?: string): string {
+  const sid = sessionId && sessions.has(sessionId) ? sessionId : DEFAULT_SESSION;
+  return sessions.get(sid) ?? "local";
+}
+
+function reassignSessions(from: string, to: string): void {
+  for (const [id, target] of sessions) {
+    if (target === from) sessions.set(id, to);
+  }
+}
+
+function sessionsUsing(targetId: string): string[] {
+  return [...sessions.entries()].filter(([, target]) => target === targetId).map(([id]) => id);
+}
+
+function createSession(id?: string): string {
+  if (id?.trim()) return ensureSession(id.trim());
+  const sid = newSessionId();
+  sessions.set(sid, "local");
+  return sid;
+}
+
+function setSessionActive(sessionId: string, target: string): void {
+  const sid = ensureSession(sessionId);
+  if (target === "local") {
+    sessions.set(sid, "local");
+    return;
+  }
+  const conn = conns.get(target);
+  if (!conn || conn.state !== "active") {
+    throw new Error("该服务器未连接");
+  }
+  sessions.set(sid, target);
+}
 
 function connOf(id: string): Conn {
   let conn = conns.get(id);
@@ -563,13 +611,13 @@ function portConflict(kind: "other_app" | "other_user", port: number): Error {
   return new Error(`远端端口 ${port} 已被其他用户的 npz-viewer 占用，请改「后端端口」后再连接。`);
 }
 
-async function connect(id: string, auth: ConnectAuth): Promise<void> {
+async function connect(id: string, auth: ConnectAuth, sessionId?: string): Promise<void> {
   const profile = readServers().find((server) => server.id === id);
   if (!profile) throw new Error("server not found");
   const conn = connOf(id);
   if (conn.state === "connecting") throw new Error("正在连接");
   if (conn.state === "active" && conn.client) {
-    active = id;
+    if (sessionId) setSessionActive(sessionId, id);
     return;
   }
   closeTunnel(conn);
@@ -589,7 +637,7 @@ async function connect(id: string, auth: ConnectAuth): Promise<void> {
         conn.state = "error";
         conn.error = "SSH 连接已断开";
         closeTunnel(conn);
-        if (active === id) active = "local";
+        reassignSessions(id, "local");
       }
     });
     persistAuth(id, auth);
@@ -622,7 +670,7 @@ async function connect(id: string, auth: ConnectAuth): Promise<void> {
     await attachTunnel(conn, profile);
     log(conn, conn.reused ? "连接就绪（复用）" : "连接就绪");
     conn.state = "active";
-    active = id;
+    if (sessionId) setSessionActive(sessionId, id);
   } catch (err) {
     closeTunnel(conn);
     closeClient(conn);
@@ -634,7 +682,13 @@ async function connect(id: string, auth: ConnectAuth): Promise<void> {
   }
 }
 
-async function disconnect(id: string): Promise<void> {
+async function disconnect(id: string, sessionId?: string): Promise<void> {
+  if (sessionId) {
+    const sid = ensureSession(sessionId);
+    if (sessions.get(sid) === id) sessions.set(sid, "local");
+  }
+  if (sessionsUsing(id).length > 0) return;
+
   const conn = connOf(id);
   const profile = readServers().find((server) => server.id === id);
   const shouldStop = conn.startedByUs;
@@ -651,10 +705,17 @@ async function disconnect(id: string): Promise<void> {
     conn.error = undefined;
     conn.startedByUs = false;
     conn.reused = false;
-    if (active === id) active = "local";
+    reassignSessions(id, "local");
     closeTunnel(conn);
     closeClient(conn);
   }
+}
+
+async function deleteSession(id: string): Promise<void> {
+  if (id === DEFAULT_SESSION) return;
+  const target = sessions.get(id);
+  sessions.delete(id);
+  if (target && target !== "local") await disconnect(target);
 }
 
 async function restart(id: string): Promise<void> {
@@ -677,7 +738,6 @@ async function restart(id: string): Promise<void> {
     await attachTunnel(conn, profile);
     log(conn, "重启完成");
     conn.state = "active";
-    active = id;
   } catch (err) {
     closeTunnel(conn);
     conn.state = "error";
@@ -686,16 +746,8 @@ async function restart(id: string): Promise<void> {
   }
 }
 
-function setActive(target: string): void {
-  if (target === "local") {
-    active = "local";
-    return;
-  }
-  const conn = conns.get(target);
-  if (!conn || conn.state !== "active") {
-    throw new Error("该服务器未连接");
-  }
-  active = target;
+function setActive(target: string, sessionId?: string): void {
+  setSessionActive(sessionId ?? DEFAULT_SESSION, target);
 }
 
 function update(id: string, patch: ServerPatch): ServerProfile {
@@ -706,7 +758,9 @@ function update(id: string, patch: ServerPatch): ServerProfile {
   return updateServer(id, patch);
 }
 
-function state(): HubState {
+function state(sessionId?: string): HubState {
+  const sid = ensureSession(sessionId ?? DEFAULT_SESSION);
+  const active = sessionTarget(sid);
   const servers = readServers().map<HubServerView>((profile) => {
     const conn = conns.get(profile.id);
     return {
@@ -719,10 +773,17 @@ function state(): HubState {
       log: conn?.log ?? [],
     };
   });
-  return { active, localActive: active === "local", servers };
+  return {
+    active,
+    localActive: active === "local",
+    servers,
+    sessionId: sid,
+    sessions: Object.fromEntries(sessions),
+  };
 }
 
-function activeTarget(): Target {
+function activeTarget(sessionId?: string): Target {
+  const active = sessionTarget(sessionId);
   if (active === "local") return LOCAL_BACKEND;
   const conn = conns.get(active);
   if (conn?.state === "active" && conn.localPort) {
@@ -741,6 +802,10 @@ function shutdown(): void {
 export const manager = {
   state,
   activeTarget,
+  ensureSession,
+  createSession,
+  deleteSession,
+  setSessionActive,
   add: (input: ServerInput) => addServer(input),
   update,
   remove: (id: string) => {
@@ -750,7 +815,7 @@ export const manager = {
       closeClient(conn);
     }
     conns.delete(id);
-    if (active === id) active = "local";
+    reassignSessions(id, "local");
     removeServer(id);
   },
   connect,

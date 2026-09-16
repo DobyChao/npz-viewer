@@ -15,6 +15,7 @@ import type {
   VideoJobInfo,
   ViewOptions,
 } from "./types";
+import { sessionHeaders, withSessionQuery } from "./session";
 
 const BASE = "/api";
 
@@ -65,7 +66,14 @@ async function toApiError(response: Response): Promise<ApiError> {
 }
 
 async function request<T>(path: string, params: Params = {}, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}${toQuery(params)}`, init);
+  const headers = new Headers(init?.headers);
+  for (const [key, value] of Object.entries(sessionHeaders())) {
+    if (!headers.has(key)) headers.set(key, value);
+  }
+  const response = await fetch(withSessionQuery(`${BASE}${path}${toQuery(params)}`), {
+    ...init,
+    headers,
+  });
   if (!response.ok) throw await toApiError(response);
   return (await response.json()) as T;
 }
@@ -152,7 +160,7 @@ export const api = {
   videoJob: (id: string) => request<VideoJobInfo>(`/video/jobs/${encodeURIComponent(id)}`),
   cancelVideoJob: (id: string) =>
     request<VideoJobInfo>(`/video/jobs/${encodeURIComponent(id)}/cancel`, {}, { method: "POST" }),
-  videoFileUrl: (id: string) => `${BASE}/video/jobs/${encodeURIComponent(id)}/file`,
+  videoFileUrl: (id: string) => withSessionQuery(`${BASE}/video/jobs/${encodeURIComponent(id)}/file`),
 };
 
 /** Cache buster: render URLs are immutable, so they must change when the file does. */
@@ -208,7 +216,7 @@ export function renderUrl({
   if (options?.gainmapGamut) params.gainmap_gamut = true;
   if (maxSize) params.max_size = maxSize;
   if (format) params.format = format;
-  return `${BASE}/npz/render${toQuery(params)}`;
+  return withSessionQuery(`${BASE}/npz/render${toQuery(params)}`);
 }
 
 export function thumbUrl(args: {
@@ -218,13 +226,15 @@ export function thumbUrl(args: {
   size?: number;
   gamut: Gamut;
 }): string {
-  return `${BASE}/npz/thumb${toQuery({
-    path: args.path,
-    prefer: args.prefer,
-    size: args.size ?? 192,
-    gamut: args.gamut,
-    v: versionParam(args.version),
-  })}`;
+  return withSessionQuery(
+    `${BASE}/npz/thumb${toQuery({
+      path: args.path,
+      prefer: args.prefer,
+      size: args.size ?? 192,
+      gamut: args.gamut,
+      v: versionParam(args.version),
+    })}`,
+  );
 }
 
 /** Folded into `v=` so immutable browser cache drops old op PNGs after rule changes. */
@@ -257,5 +267,5 @@ export function opRenderUrl(args: {
   if (args.left.options?.gainmapGamut || args.right.options?.gainmapGamut) params.gainmap_gamut = true;
   if (args.maxSize) params.max_size = args.maxSize;
   if (args.format) params.format = args.format;
-  return `${BASE}/npz/op/render${toQuery(params)}`;
+  return withSessionQuery(`${BASE}/npz/op/render${toQuery(params)}`);
 }

@@ -68,7 +68,7 @@ cd frontend && npm install
 npm run tauri:dev
 ```
 
-会起 Vite `:5273`，再打开原生窗口。顶栏「后端服务器」可用。
+会起 Vite `:5273`，再打开原生窗口（顶部原生标签栏，每个标签一个 WebView）。顶栏「后端服务器」只切换**当前标签**的后端。
 
 #### Windows 便携 zip（解压即用）
 
@@ -79,7 +79,7 @@ cd frontend && npm install
 npm run pack:windows
 ```
 
-产物是 `dist-portable/npz-view-0.1.0-windows-x64.zip`。解压到普通文件夹，双击 `npz-view.exe`。zip 里已带 Node、embeddable Python 和前端 dist，**不需要**再装 Node / Python，也**不要**放到 Program Files。本机只需 Windows 自带的 WebView2。打不开时看同目录 `npz-view-hub.log`。
+产物是 `dist-portable/npz-view-0.1.1-windows-x64.zip`。解压到普通文件夹，双击 `npz-view.exe`。zip 里已带 Node、embeddable Python 和前端 dist，**不需要**再装 Node / Python，也**不要**放到 Program Files。本机只需 Windows 自带的 WebView2。打不开时看同目录 `npz-view-hub.log`。
 
 源码直接打 exe（迭代用，仍要本机 Node / Python / 这份仓库）：
 
@@ -90,9 +90,9 @@ npm run tauri:build
 
 Windows x64 交叉编译（Linux 上）仍可用 `npm run tauri:build:windows`；那个 NSIS `setup.exe` 会装到 Program Files，便携布局对不上，请用上面的 zip。
 
-发布版启动时会拉起 `scripts/npz-view.mjs`（便携版用自带 Python + 自带 hub；源码运行则用本机 Python + vite preview）。窗口打开 `http://127.0.0.1:5273`。退出窗口会停掉这层壳。Windows 上 Node 日志写在客户端目录的 `npz-view-hub.log`。
+发布版启动时会拉起 `scripts/npz-view.mjs`（便携版用自带 Python + 自带 hub；源码运行则用本机 Python + vite preview），并给 hub 一个**临时本机端口**（`NPZVIEW_UI_PORT`，不固定占用 5273）。窗口用原生多 WebView 标签打开该地址（`/?session=<id>`）。关掉最后一个标签或退出窗口会停掉这层壳。Windows 上 Node 日志写在客户端目录的 `npz-view-hub.log`。
 
-只要页面、不要窗口时仍可用：
+只要页面、不要窗口时仍可用（未指定端口时同样自选空闲端口）：
 
 ```bash
 node scripts/npz-view.mjs
@@ -136,7 +136,7 @@ cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/di
 
 连接时会：用 SFTP 按 mtime/size 增量同步 **`backend/app` 和 `requirements.txt`**（测试、文档、`.cursor` 等不会上传）→ 在 SSH 会话里探测远端 `127.0.0.1:<后端端口>` → 建立 SSH
 隧道（本机 `net.Server` + `forwardOut`，等效 `ssh -L`）→ 健康检查。`/api` 随后转到所选后端，
-**原始 npz 不过网，只有渲染好的图和 JSON 回传**。已连接的服务器之间点「使用」切换，不用再输凭据。
+**原始 npz 不过网，只有渲染好的图和 JSON 回传**。已连接的服务器之间点「使用」切换**当前标签**，不用再输凭据。桌面客户端可开多个标签，各自指向本机或已连接的远端；断开隧道仅当没有任何标签仍指向该服务器。
 
 连本机 WSL（`127.0.0.1:22`）时，占用探测走远端 python，不依赖 Windows 侧 SSH 端口转发。若 Defender 拦过 Node Runtime，请在防火墙里允许它，否则隧道（`direct-tcpip`）会失败，看起来像「怎么改端口都被占用」。
 
@@ -149,8 +149,8 @@ cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/di
 要求：远端目录里要有 `.venv`（首次连接会尝试用系统 `python3 -m venv` 创建）。若系统 Python 缺 ensurepip，界面会提示你 SSH 上去用任意带 pip 的 Python 自行创建（conda / uv / 自己编译的均可），不必装 `python3-venv`。后端需要 Python 3.13+ 才能用视频导出。每台服务器有各自的 `roots.json` 和缓存。
 服务器列表存在本机的 `servers.json`（已 gitignore），只含 host/user/端口/目录/认证方式/可选密钥路径。
 
-实现在本机 Node 里（`frontend/hub/`，`ssh2`）：`/__hub/*` 是管理接口，`/api/*` 被动态反代到当前后端。
-桌面窗口是 Tauri（`npm run tauri:dev`）。不要窗口时用 `node scripts/npz-view.mjs`。纯 Python
+实现在本机 Node 里（`frontend/hub/`，`ssh2`）：`/__hub/*` 是管理接口，`/api/*` 按请求上的 session（头 `X-Npzview-Session` 或 query `npzview_session`）反代到该标签的后端。
+桌面窗口是 Tauri（`npm run tauri:dev`），原生标签栏 + 多 WebView。不要窗口时用 `node scripts/npz-view.mjs`（浏览器里仍是单页）。纯 Python
 `--static-dir` 单进程没有这层 Node，不能从 UI 发起 SSH。
 
 ## 渲染规则

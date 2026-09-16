@@ -263,8 +263,8 @@ export function ServersDialog({
       <div className="space-y-4">
         <p className="text-xs text-zinc-500">
           前端始终在本机运行，数据请求 <code className="text-zinc-400">/api</code>{" "}
-          会被转发到<b className="text-zinc-300">当前后端</b>。连接时现场输入密码或选择私钥（凭据只留内存，已连接的服务器之间切换不用再输）。同步走
-          SFTP；远端已有本用户的健康后端则复用。端口被其他程序或其他用户占用时请改「后端端口」。
+          会被转发到<b className="text-zinc-300">本标签的后端</b>。服务器列表全局共享；「使用」只切换当前标签。连接时现场输入密码或选择私钥（凭据只留内存，已连接的服务器之间切换不用再输）。同步走
+          SFTP；远端已有本用户的健康后端则复用。断开隧道仅当没有任何标签仍指向该服务器。端口被其他程序或其他用户占用时请改「后端端口」。
         </p>
 
         <div className="overflow-hidden rounded border border-zinc-800">
@@ -279,7 +279,7 @@ export function ServersDialog({
                 <Check size={11} /> 当前
               </span>
             ) : (
-              <Button onClick={() => setActive.mutate("local")} disabled={setActive.isPending}>
+              <Button onClick={() => setActive.mutate("local")} disabled={setActive.isPending} title="本标签改用本机后端">
                 使用
               </Button>
             )}
@@ -329,7 +329,7 @@ export function ServersDialog({
                   <div className="flex shrink-0 items-center gap-1">
                     {isBusy && <Spinner className="mr-1" />}
                     {connected && !server.active && (
-                      <Button onClick={() => setActive.mutate(server.id)} title="切到该后端（无需再认证）">
+                      <Button onClick={() => setActive.mutate(server.id)} title="本标签使用该后端（无需再认证）">
                         使用
                       </Button>
                     )}
@@ -348,8 +348,8 @@ export function ServersDialog({
                           disabled={isBusy}
                           title={
                             server.startedByUs
-                              ? "停止远端后端并断开隧道"
-                              : "断开隧道（复用的远端后端不会停）"
+                              ? "本标签改回本机；若没有其他标签仍指向该服务器，则停止远端后端并断开隧道"
+                              : "本标签改回本机；若没有其他标签仍指向该服务器，则断开隧道（复用的远端后端不会停）"
                           }
                         >
                           <Power size={13} /> {server.startedByUs ? "停止" : "断开"}

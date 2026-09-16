@@ -1,6 +1,8 @@
 // Browser client for the dev-server control plane (see frontend/hub/plugin.ts).
 // Lets the UI manage remote-backend servers and pick which one serves /api.
 
+import { sessionHeaders } from "./session";
+
 export type ServerConnState = "idle" | "connecting" | "active" | "error";
 export type AuthMethod = "agent" | "password" | "key";
 
@@ -26,6 +28,8 @@ export interface HubState {
   active: string;
   localActive: boolean;
   servers: HubServer[];
+  sessionId?: string;
+  sessions?: Record<string, string>;
 }
 
 export interface NewServer {
@@ -60,7 +64,11 @@ export interface ServerPatch {
 const HUB = "/__hub";
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${HUB}${path}`, init);
+  const headers = new Headers(init?.headers);
+  for (const [key, value] of Object.entries(sessionHeaders())) {
+    if (!headers.has(key)) headers.set(key, value);
+  }
+  const response = await fetch(`${HUB}${path}`, { ...init, headers });
   const text = await response.text();
   const body = text ? JSON.parse(text) : {};
   if (!response.ok) {
@@ -91,4 +99,9 @@ export const hub = {
   restart: (id: string) =>
     send<HubState>(`/servers/${encodeURIComponent(id)}/restart`, "POST"),
   setActive: (target: string) => send<HubState>("/active", "POST", { target }),
+  createSession: (id?: string) => send<{ id: string; state: HubState }>("/sessions", "POST", id ? { id } : {}),
+  deleteSession: (id: string) =>
+    call<{ ok: boolean }>(`/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  setSessionActive: (id: string, target: string) =>
+    send<HubState>(`/sessions/${encodeURIComponent(id)}/active`, "POST", { target }),
 };
