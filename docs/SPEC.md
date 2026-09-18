@@ -549,3 +549,4 @@ confirm_large, save_dir?, viewport?: {scale,x,y,tile_width,tile_height,natural_s
 | 2026-09-01 | 序列播放 render URL 带 live `v=`；无 `v=` 不标 immutable | 文件改写后对比 video 仍命中旧 HTTP / imageCache |
 | 2026-09-01 | 拖 scrubber 等到目标帧就绪才换图 | 拖过预取窗口会先闪中间缓存帧再跳到目标 |
 | 2026-09-15 | 桌面客户端原生多 WebView 标签，每标签独立 hub session / 后端；发布壳 UI 端口临时分配 | 多远端并行对比；避免固定占用 5273 |
+| 2026-09-17 | 远端连接先 health/占用探测，同用户已有后端则复用；连接可中断；venv 已能导入则跳过 pip | 避免每次连都卡在装依赖；坏网时不应反复失败 |

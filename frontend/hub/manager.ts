@@ -40,6 +40,15 @@ interface Conn {
   log: string[];
   startedByUs: boolean;
   reused: boolean;
+  /** Bumped to invalidate an in-flight connect (cancel / new attempt). */
+  gen: number;
+}
+
+class ConnectCancelled extends Error {
+  constructor() {
+    super("已中断连接");
+    this.name = "ConnectCancelled";
+  }
 }
 
 export interface HubServerView extends ServerProfile {
@@ -122,7 +131,7 @@ function setSessionActive(sessionId: string, target: string): void {
 function connOf(id: string): Conn {
   let conn = conns.get(id);
   if (!conn) {
-    conn = { state: "idle", log: [], startedByUs: false, reused: false };
+    conn = { state: "idle", log: [], startedByUs: false, reused: false, gen: 0 };
     conns.set(id, conn);
   }
   return conn;
@@ -158,7 +167,19 @@ function authError(err: unknown): Error {
   return err instanceof Error ? err : new Error(message);
 }
 
-function sshConnect(profile: ServerProfile, auth: ConnectAuth): Promise<Client> {
+function isCancelled(err: unknown): boolean {
+  return err instanceof ConnectCancelled || (err instanceof Error && err.name === "ConnectCancelled");
+}
+
+function assertLive(isLive?: () => boolean): void {
+  if (isLive && !isLive()) throw new ConnectCancelled();
+}
+
+function sshConnect(
+  profile: ServerProfile,
+  auth: ConnectAuth,
+  onCreated?: (client: Client) => void,
+): Promise<Client> {
   const config: ConnectConfig = {
     host: profile.host,
     port: profile.port,
@@ -190,6 +211,7 @@ function sshConnect(profile: ServerProfile, auth: ConnectAuth): Promise<Client> 
 
   return new Promise((resolveConn, rejectConn) => {
     const client = new Client();
+    onCreated?.(client);
     let settled = false;
     const succeed = () => {
       if (settled) return;
@@ -229,16 +251,22 @@ function exec(
   command: string,
   stdin?: string,
   onOutput?: (line: string) => void,
+  isLive?: () => boolean,
 ): Promise<ExecResult> {
   return new Promise((resolveExec, rejectExec) => {
+    if (isLive && !isLive()) {
+      rejectExec(new ConnectCancelled());
+      return;
+    }
     client.exec(command, (err, stream: ClientChannel) => {
       if (err) {
-        rejectExec(err);
+        rejectExec(isLive && !isLive() ? new ConnectCancelled() : err);
         return;
       }
       let stdout = "";
       let stderr = "";
       let hold = "";
+      let settled = false;
       const take = (chunk: Buffer | string) => {
         const text = String(chunk);
         hold += text;
@@ -250,6 +278,32 @@ function exec(
           }
         }
       };
+      const abortRemote = () => {
+        try {
+          stream.close();
+        } catch {
+          /* ignore */
+        }
+        try {
+          stream.destroy();
+        } catch {
+          /* ignore */
+        }
+      };
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        if (watch) clearInterval(watch);
+        fn();
+      };
+      const watch =
+        isLive &&
+        setInterval(() => {
+          if (!isLive()) {
+            abortRemote();
+            finish(() => rejectExec(new ConnectCancelled()));
+          }
+        }, 250);
       stream.on("data", (chunk: Buffer | string) => {
         stdout += String(chunk);
         take(chunk);
@@ -259,10 +313,15 @@ function exec(
         take(chunk);
       });
       stream.on("close", (code: number | null) => {
-        if (onOutput && hold.trim()) onOutput(hold);
-        resolveExec({ code: code ?? 0, stdout, stderr });
+        finish(() => {
+          if (onOutput && hold.trim()) onOutput(hold);
+          if (isLive && !isLive()) rejectExec(new ConnectCancelled());
+          else resolveExec({ code: code ?? 0, stdout, stderr });
+        });
       });
-      stream.on("error", rejectExec);
+      stream.on("error", (streamErr: Error) => {
+        finish(() => rejectExec(isLive && !isLive() ? new ConnectCancelled() : streamErr));
+      });
       if (stdin !== undefined) {
         stream.write(stdin);
       }
@@ -281,10 +340,11 @@ function parseLastJson<T>(stdout: string): T | null {
   }
 }
 
-async function expandRemoteDir(client: Client, remoteDir: string): Promise<string> {
+async function expandRemoteDir(client: Client, remoteDir: string, isLive?: () => boolean): Promise<string> {
   const trimmed = remoteDir.trim() || "~/.npz-viewer-backend";
   if (!trimmed.startsWith("~")) return trimmed;
-  const home = await exec(client, 'printf %s "$HOME"');
+  assertLive(isLive);
+  const home = await exec(client, 'printf %s "$HOME"', undefined, undefined, isLive);
   const root = home.stdout || "/tmp";
   if (trimmed === "~") return root;
   return `${root}${trimmed.slice(1)}`;
@@ -362,9 +422,10 @@ async function listenerInfo(
   client: Client,
   port: number,
   remoteDir: string,
+  isLive?: () => boolean,
 ): Promise<{ uids: number[]; me: number } | null> {
   const prefix = envPrefix(remoteDir, port);
-  const py = await exec(client, `${prefix} python3 -`, OWNERSHIP_PY);
+  const py = await exec(client, `${prefix} python3 -`, OWNERSHIP_PY, undefined, isLive);
   if (py.code !== 0) return null;
   const info = parseLastJson<{ uids?: unknown; me?: unknown }>(py.stdout);
   if (!info || !Array.isArray(info.uids) || typeof info.me !== "number") return null;
@@ -372,21 +433,31 @@ async function listenerInfo(
   return { uids, me: info.me };
 }
 
-async function remoteHealthExec(client: Client, port: number, remoteDir: string): Promise<HttpProbe> {
+async function remoteHealthExec(
+  client: Client,
+  port: number,
+  remoteDir: string,
+  isLive?: () => boolean,
+): Promise<HttpProbe> {
   const prefix = envPrefix(remoteDir, port);
-  const py = await exec(client, `${prefix} python3 -`, HEALTH_PY);
+  const py = await exec(client, `${prefix} python3 -`, HEALTH_PY, undefined, isLive);
   const probe = parseLastJson<HttpProbe>(py.stdout);
   if (probe) return probe;
   return { kind: "blocked", detail: py.stderr.trim() || py.stdout.trim() || `python3 exit ${py.code}` };
 }
 
-async function weOwnListener(client: Client, port: number, remoteDir: string): Promise<boolean> {
-  const info = await listenerInfo(client, port, remoteDir);
+async function weOwnListener(
+  client: Client,
+  port: number,
+  remoteDir: string,
+  isLive?: () => boolean,
+): Promise<boolean> {
+  const info = await listenerInfo(client, port, remoteDir, isLive);
   if (info && info.uids.length > 0) {
     return info.uids.every((uid) => uid === info.me);
   }
   const prefix = envPrefix(remoteDir, port);
-  const sh = await exec(client, `${prefix} bash -s`, OURS_FALLBACK_SH);
+  const sh = await exec(client, `${prefix} bash -s`, OURS_FALLBACK_SH, undefined, isLive);
   return /(^|\n)ours\s*$/.test(sh.stdout.trim());
 }
 
@@ -395,9 +466,10 @@ async function probePort(
   port: number,
   remoteDir: string,
   logLine: (line: string) => void,
+  isLive?: () => boolean,
 ): Promise<PortKind> {
-  logLine(`探测远端 127.0.0.1:${port}（在 SSH 会话内用 python 访问，不依赖本机端口转发）`);
-  const info = await listenerInfo(client, port, remoteDir);
+  logLine(`探测远端 127.0.0.1:${port}（health + 占用，同用户已有后端则直接复用）`);
+  const info = await listenerInfo(client, port, remoteDir, isLive);
   if (info) {
     logLine(
       info.uids.length > 0
@@ -408,7 +480,7 @@ async function probePort(
     logLine("无法读取远端 /proc 监听表，改用 HTTP 探测");
   }
 
-  const httpProbe = await remoteHealthExec(client, port, remoteDir);
+  const httpProbe = await remoteHealthExec(client, port, remoteDir, isLive);
   if (httpProbe.kind === "http") {
     logLine(`远端 HTTP ${httpProbe.status}`);
   } else if (httpProbe.kind === "refused") {
@@ -437,7 +509,7 @@ async function probePort(
   }
 
   if (oursHttp) {
-    return (await weOwnListener(client, port, remoteDir)) ? "ours" : "other_user";
+    return (await weOwnListener(client, port, remoteDir, isLive)) ? "ours" : "other_user";
   }
   return "other_app";
 }
@@ -469,10 +541,14 @@ function openTunnel(client: Client, remotePort: number): Promise<{ server: net.S
   });
 }
 
-function healthCheck(port: number, timeoutMs = 25000): Promise<boolean> {
+function healthCheck(port: number, timeoutMs = 25000, isLive?: () => boolean): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  return new Promise((resolveHealth) => {
+  return new Promise((resolveHealth, rejectHealth) => {
     const attempt = () => {
+      if (isLive && !isLive()) {
+        rejectHealth(new ConnectCancelled());
+        return;
+      }
       const req = http.get(
         { host: "127.0.0.1", port, path: "/api/health", timeout: 2000 },
         (res) => {
@@ -488,6 +564,10 @@ function healthCheck(port: number, timeoutMs = 25000): Promise<boolean> {
       });
     };
     const retry = () => {
+      if (isLive && !isLive()) {
+        rejectHealth(new ConnectCancelled());
+        return;
+      }
       if (Date.now() > deadline) resolveHealth(false);
       else setTimeout(attempt, 500);
     };
@@ -527,17 +607,18 @@ async function stopRemote(conn: Conn, profile: ServerProfile, alsoKillOurs: bool
   }
 }
 
-async function attachTunnel(conn: Conn, profile: ServerProfile): Promise<void> {
+async function attachTunnel(conn: Conn, profile: ServerProfile, isLive?: () => boolean): Promise<void> {
   if (!conn.client) throw new Error("SSH 未连接");
+  assertLive(isLive);
   const { server, localPort } = await openTunnel(conn.client, profile.remotePort);
   conn.tunnel = server;
   conn.localPort = localPort;
   log(conn, `建立隧道 127.0.0.1:${localPort} → 远端 127.0.0.1:${profile.remotePort}`);
   const timeout = conn.reused ? 8000 : 25000;
-  if (!(await healthCheck(localPort, timeout))) {
+  if (!(await healthCheck(localPort, timeout, isLive))) {
     closeTunnel(conn);
-    const remoteDir = await expandRemoteDir(conn.client, profile.remoteDir);
-    const remote = await remoteHealthExec(conn.client, profile.remotePort, remoteDir);
+    const remoteDir = await expandRemoteDir(conn.client, profile.remoteDir, isLive);
+    const remote = await remoteHealthExec(conn.client, profile.remotePort, remoteDir, isLive);
     if (remote.kind === "http" && isNpzHealth(remote.status, remote.body)) {
       throw new Error(
         "远端后端已起来，但本机 SSH 隧道连不上。若连的是 WSL / 127.0.0.1，请在 Windows 防火墙里允许 Node（Defender 拦过「Node Runtime」就会这样），并确认 sshd 开启 AllowTcpForwarding。",
@@ -547,15 +628,20 @@ async function attachTunnel(conn: Conn, profile: ServerProfile): Promise<void> {
   }
 }
 
-async function syncCode(conn: Conn, profile: ServerProfile): Promise<string> {
+async function syncCode(conn: Conn, profile: ServerProfile, isLive?: () => boolean): Promise<string> {
   if (!conn.client) throw new Error("SSH 未连接");
-  const remoteDir = await expandRemoteDir(conn.client, profile.remoteDir);
+  assertLive(isLive);
+  const remoteDir = await expandRemoteDir(conn.client, profile.remoteDir, isLive);
   log(conn, `SFTP 同步 → ${profile.user}@${profile.host}:${remoteDir}`);
   const sftp = await new Promise<import("ssh2").SFTPWrapper>((resolveSftp, rejectSftp) => {
+    assertLive(isLive);
     conn.client!.sftp((err, wrapped) => (err ? rejectSftp(err) : resolveSftp(wrapped)));
   });
   try {
-    const stats = await mirror(sftp, REPO_ROOT, remoteDir, (line) => log(conn, line));
+    const stats = await mirror(sftp, REPO_ROOT, remoteDir, (line) => {
+      assertLive(isLive);
+      log(conn, line);
+    });
     log(conn, `同步完成：上传 ${stats.uploaded}，跳过 ${stats.skipped}，删除 ${stats.deleted}`);
   } finally {
     sftp.end();
@@ -581,16 +667,25 @@ function venvRequiredError(remoteDir: string): Error {
   );
 }
 
-async function startRemote(conn: Conn, remoteDir: string, port: number): Promise<void> {
+async function startRemote(conn: Conn, remoteDir: string, port: number, isLive?: () => boolean): Promise<void> {
   if (!conn.client) throw new Error("SSH 未连接");
-  log(conn, "远端安装依赖并启动后端…");
-  const result = await exec(conn.client, `${envPrefix(remoteDir, port)} bash -s`, BOOTSTRAP_SH, (line) =>
-    log(conn, line),
+  log(conn, "远端准备并启动后端…");
+  const result = await exec(
+    conn.client,
+    `${envPrefix(remoteDir, port)} bash -s`,
+    BOOTSTRAP_SH,
+    (line) => log(conn, line),
+    isLive,
   );
   if (result.code !== 0) {
     const text = `${result.stdout}\n${result.stderr}`;
     if (result.code === 4 || /NPZVIEW_VENV_REQUIRED/.test(text)) {
       throw venvRequiredError(remoteDir);
+    }
+    if (result.code === 5 || /安装依赖失败/.test(text)) {
+      throw new Error(
+        "远端安装 Python 依赖失败（常见原因：访问 PyPI 不通）。请在远端手动 pip 后再连接；若该端口上后端已经在跑，下次会直接复用，不会再走安装。",
+      );
     }
     throw new Error("远端启动后端失败");
   }
@@ -622,6 +717,9 @@ async function connect(id: string, auth: ConnectAuth, sessionId?: string): Promi
   }
   closeTunnel(conn);
   closeClient(conn);
+  conn.gen += 1;
+  const gen = conn.gen;
+  const isLive = () => conn.gen === gen;
   conn.state = "connecting";
   conn.error = undefined;
   conn.log = [];
@@ -630,9 +728,13 @@ async function connect(id: string, auth: ConnectAuth, sessionId?: string): Promi
 
   try {
     log(conn, `SSH ${profile.user}@${profile.host}:${profile.port}（${auth.authMethod}）`);
-    const client = await sshConnect(profile, auth);
+    const client = await sshConnect(profile, auth, (created) => {
+      conn.client = created;
+    });
+    assertLive(isLive);
     conn.client = client;
     client.on("close", () => {
+      if (conn.gen !== gen) return;
       if (conn.state === "active") {
         conn.state = "error";
         conn.error = "SSH 连接已断开";
@@ -643,6 +745,7 @@ async function connect(id: string, auth: ConnectAuth, sessionId?: string): Promi
     persistAuth(id, auth);
 
     const fwd = await remoteHttpGet(client, 9, "/", 2500);
+    assertLive(isLive);
     if (fwd.kind === "blocked" && /administratively prohibited|forwarding disabled/i.test(fwd.detail)) {
       throw new Error("SSH 服务器禁止端口转发（AllowTcpForwarding）");
     }
@@ -653,25 +756,39 @@ async function connect(id: string, auth: ConnectAuth, sessionId?: string): Promi
       );
     }
 
-    const remoteDir = await syncCode(conn, profile);
-    const kind = await probePort(client, profile.remotePort, remoteDir, (line) => log(conn, line));
+    const remoteDir = await expandRemoteDir(client, profile.remoteDir, isLive);
+    const kind = await probePort(client, profile.remotePort, remoteDir, (line) => log(conn, line), isLive);
     if (kind === "other_app" || kind === "other_user") {
       throw portConflict(kind, profile.remotePort);
     }
     if (kind === "ours") {
-      log(conn, `复用已有后端 127.0.0.1:${profile.remotePort}`);
+      log(conn, `复用已有后端 127.0.0.1:${profile.remotePort}（跳过同步与安装）`);
       conn.reused = true;
       conn.startedByUs = false;
     } else {
-      await startRemote(conn, remoteDir, profile.remotePort);
+      log(conn, "端口空闲，开始部署");
+      await syncCode(conn, profile, isLive);
+      await startRemote(conn, remoteDir, profile.remotePort, isLive);
       conn.startedByUs = true;
       conn.reused = false;
     }
-    await attachTunnel(conn, profile);
+    await attachTunnel(conn, profile, isLive);
     log(conn, conn.reused ? "连接就绪（复用）" : "连接就绪");
     conn.state = "active";
     if (sessionId) setSessionActive(sessionId, id);
   } catch (err) {
+    if (conn.gen !== gen || isCancelled(err)) {
+      if (conn.gen === gen) {
+        closeTunnel(conn);
+        closeClient(conn);
+        conn.state = "idle";
+        conn.startedByUs = false;
+        conn.reused = false;
+        conn.error = undefined;
+        log(conn, "已中断连接");
+      }
+      return;
+    }
     closeTunnel(conn);
     closeClient(conn);
     conn.state = "error";
@@ -682,14 +799,33 @@ async function connect(id: string, auth: ConnectAuth, sessionId?: string): Promi
   }
 }
 
+function abortConnecting(conn: Conn): void {
+  if (conn.state !== "connecting") return;
+  conn.gen += 1;
+  log(conn, "中断连接…");
+  closeTunnel(conn);
+  closeClient(conn);
+  conn.state = "idle";
+  conn.error = undefined;
+  conn.startedByUs = false;
+  conn.reused = false;
+}
+
 async function disconnect(id: string, sessionId?: string): Promise<void> {
+  const conn = connOf(id);
+  if (conn.state === "connecting") {
+    abortConnecting(conn);
+    if (sessionId) {
+      const sid = ensureSession(sessionId);
+      if (sessions.get(sid) === id) sessions.set(sid, "local");
+    }
+    return;
+  }
   if (sessionId) {
     const sid = ensureSession(sessionId);
     if (sessions.get(sid) === id) sessions.set(sid, "local");
   }
   if (sessionsUsing(id).length > 0) return;
-
-  const conn = connOf(id);
   const profile = readServers().find((server) => server.id === id);
   const shouldStop = conn.startedByUs;
   try {
@@ -701,6 +837,7 @@ async function disconnect(id: string, sessionId?: string): Promise<void> {
     }
   } finally {
     // Mark idle before tearing down the client so the 'close' handler is a no-op.
+    conn.gen += 1;
     conn.state = "idle";
     conn.error = undefined;
     conn.startedByUs = false;

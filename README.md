@@ -134,8 +134,8 @@ cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/di
 - **私钥文件**：填本机密钥路径，可选私钥口令；路径可以记住，密钥内容和口令不落盘
 - **ssh-agent**：沿用本机已有的免密环境
 
-连接时会：用 SFTP 按 mtime/size 增量同步 **`backend/app` 和 `requirements.txt`**（测试、文档、`.cursor` 等不会上传）→ 在 SSH 会话里探测远端 `127.0.0.1:<后端端口>` → 建立 SSH
-隧道（本机 `net.Server` + `forwardOut`，等效 `ssh -L`）→ 健康检查。`/api` 随后转到所选后端，
+连接时会：SSH 登录 → 在 SSH 会话里探测远端 `127.0.0.1:<后端端口>` 的占用和 `/api/health` →
+**同用户已有健康后端则只建隧道、跳过部署** → 端口空闲才 SFTP 增量同步 **`backend/app` 和 `requirements.txt`** 并启动（`.venv` 里依赖已能导入则跳过 pip）。连接过程可在界面里「中断」。隧道是本机 `net.Server` + `forwardOut`（等效 `ssh -L`）。`/api` 随后转到所选后端，
 **原始 npz 不过网，只有渲染好的图和 JSON 回传**。已连接的服务器之间点「使用」切换**当前标签**，不用再输凭据。桌面客户端可开多个标签，各自指向本机或已连接的远端；断开隧道仅当没有任何标签仍指向该服务器。
 
 连本机 WSL（`127.0.0.1:22`）时，占用探测走远端 python，不依赖 Windows 侧 SSH 端口转发。若 Defender 拦过 Node Runtime，请在防火墙里允许它，否则隧道（`direct-tcpip`）会失败，看起来像「怎么改端口都被占用」。

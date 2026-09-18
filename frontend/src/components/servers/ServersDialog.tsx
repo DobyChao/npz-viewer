@@ -191,6 +191,17 @@ export function ServersDialog({
   });
   const connect = useMutation({
     mutationFn: ({ id, creds }: { id: string; creds: ConnectAuth }) => hub.connect(id, creds),
+    onMutate: ({ id }) => {
+      queryClient.setQueryData<HubState>(["hub-state"], (prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          servers: prev.servers.map((server) =>
+            server.id === id ? { ...server, state: "connecting", error: null } : server,
+          ),
+        };
+      });
+    },
     onSuccess: (next) => {
       apply(next);
       setAuthId(null);
@@ -222,13 +233,16 @@ export function ServersDialog({
 
   const state = data;
   const servers = state?.servers ?? [];
-  const busyId = connect.isPending
-    ? connect.variables?.id
-    : disconnect.isPending
-      ? disconnect.variables
-      : restart.isPending
-        ? restart.variables
-        : undefined;
+  const connectingId = servers.find((server) => server.state === "connecting")?.id;
+  const connectStillRunning =
+    connect.isPending &&
+    connect.variables &&
+    servers.find((server) => server.id === connect.variables.id)?.state !== "idle" &&
+    servers.find((server) => server.id === connect.variables.id)?.state !== "error";
+  const busyId = connectingId
+    ?? (connectStillRunning ? connect.variables?.id : undefined)
+    ?? (disconnect.isPending ? disconnect.variables : undefined)
+    ?? (restart.isPending ? restart.variables : undefined);
 
   const canSubmit = form.host.trim() && form.user.trim();
 
@@ -263,8 +277,8 @@ export function ServersDialog({
       <div className="space-y-4">
         <p className="text-xs text-zinc-500">
           前端始终在本机运行，数据请求 <code className="text-zinc-400">/api</code>{" "}
-          会被转发到<b className="text-zinc-300">本标签的后端</b>。服务器列表全局共享；「使用」只切换当前标签。连接时现场输入密码或选择私钥（凭据只留内存，已连接的服务器之间切换不用再输）。同步走
-          SFTP；远端已有本用户的健康后端则复用。断开隧道仅当没有任何标签仍指向该服务器。端口被其他程序或其他用户占用时请改「后端端口」。
+          会被转发到<b className="text-zinc-300">本标签的后端</b>。服务器列表全局共享；「使用」只切换当前标签。连接时现场输入密码或选择私钥（凭据只留内存，已连接的服务器之间切换不用再输）。先探测远端端口
+          health：同用户已有健康后端则只接隧道；端口空闲才 SFTP 部署并启动。连接过程可随时「中断」。断开隧道仅当没有任何标签仍指向该服务器。端口被其他程序或其他用户占用时请改「后端端口」。
         </p>
 
         <div className="overflow-hidden rounded border border-zinc-800">
@@ -331,6 +345,16 @@ export function ServersDialog({
                     {connected && !server.active && (
                       <Button onClick={() => setActive.mutate(server.id)} title="本标签使用该后端（无需再认证）">
                         使用
+                      </Button>
+                    )}
+                    {server.state === "connecting" && (
+                      <Button
+                        variant="danger"
+                        onClick={() => disconnect.mutate(server.id)}
+                        disabled={disconnect.isPending}
+                        title="中断这次连接（不会停掉远端已在跑的后端）"
+                      >
+                        中断
                       </Button>
                     )}
                     {connected ? (
@@ -407,11 +431,19 @@ export function ServersDialog({
                       </div>
                     )}
                     <div className="flex justify-end gap-1">
-                      <Button onClick={() => setAuthId(null)}>取消</Button>
+                      <Button
+                        onClick={() => {
+                          setAuthId(null);
+                          if (server.state === "connecting") disconnect.mutate(server.id);
+                        }}
+                      >
+                        {server.state === "connecting" ? "中断" : "取消"}
+                      </Button>
                       <Button
                         variant="solid"
                         disabled={
                           isBusy ||
+                          server.state === "connecting" ||
                           (auth.authMethod === "password" && !auth.password) ||
                           (auth.authMethod === "key" && !auth.keyPath?.trim())
                         }

@@ -161,14 +161,27 @@ if [ -z "$VENV_PY" ]; then
 fi
 [ -n "$VENV_PY" ] || { print_venv_help; exit 4; }
 echo "使用 $VENV_PY ($("$VENV_PY" --version 2>&1))"
-if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
-  echo "已有 .venv，但这个解释器没有 pip。"
-  print_venv_help
-  exit 4
+deps_ok() {
+  "$VENV_PY" -c "import fastapi, uvicorn, numpy, PIL, pydantic, pydantic_settings, orjson, imageio_ffmpeg" >/dev/null 2>&1
+}
+if deps_ok; then
+  echo "依赖已就绪，跳过 pip"
+else
+  if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+    echo "已有 .venv，但这个解释器没有 pip，且现有依赖不完整。"
+    print_venv_help
+    exit 4
+  fi
+  echo "安装 Python 依赖…"
+  if ! "$VENV_PY" -m pip install -r requirements.txt; then
+    if deps_ok; then
+      echo "pip 未完成，但现有依赖可导入，继续启动"
+    else
+      echo "安装依赖失败（常见原因：远端访问 PyPI 不通）。请在这台机器上手动 pip 后再连接；若后端已经在跑，下次会直接复用，不会再走安装。"
+      exit 5
+    fi
+  fi
 fi
-echo "安装 Python 依赖…"
-"$VENV_PY" -m pip install --upgrade pip
-"$VENV_PY" -m pip install -r requirements.txt
 echo "启动后端…"
 if command -v tmux >/dev/null 2>&1; then
   tmux kill-session -t "$SESSION" 2>/dev/null || true
