@@ -214,6 +214,7 @@ export function renderUrl({
   if (options?.colormap && options.colormap !== "none") params.colormap = options.colormap;
   if (options?.alpha && options.alpha !== "composite") params.alpha = options.alpha;
   if (options?.gainmapGamut) params.gainmap_gamut = true;
+  if (options?.gain !== undefined && options.gain !== 1) params.gain = options.gain;
   if (maxSize) params.max_size = maxSize;
   if (format) params.format = format;
   return withSessionQuery(`${BASE}/npz/render${toQuery(params)}`);
@@ -238,7 +239,7 @@ export function thumbUrl(args: {
 }
 
 /** Folded into `v=` so immutable browser cache drops old op PNGs after rule changes. */
-const OP_RENDER_CACHE = "1";
+const OP_RENDER_CACHE = "2";
 
 export function opRenderUrl(args: {
   op: string;
@@ -248,6 +249,8 @@ export function opRenderUrl(args: {
   version?: string;
   maxSize?: number;
   format?: "png" | "webp";
+  /** Display gain of the derived result; operand gains never enter this URL. */
+  gain?: number;
 }): string {
   const params: Params = {
     op: args.op,
@@ -265,6 +268,7 @@ export function opRenderUrl(args: {
   const colormap = args.left.options?.colormap ?? args.right.options?.colormap;
   if (colormap && colormap !== "none") params.colormap = colormap;
   if (args.left.options?.gainmapGamut || args.right.options?.gainmapGamut) params.gainmap_gamut = true;
+  if (args.gain !== undefined && args.gain !== 1) params.gain = args.gain;
   if (args.maxSize) params.max_size = args.maxSize;
   if (args.format) params.format = args.format;
   return withSessionQuery(`${BASE}/npz/op/render${toQuery(params)}`);

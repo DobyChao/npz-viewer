@@ -40,6 +40,21 @@ def test_rgb_clips_out_of_range_values() -> None:
     assert pixels[0, 0].tolist() == [0, 255, 255]
 
 
+def test_rgb_gain_scales_before_gamma() -> None:
+    pixels = render("rgb_hwc", filled((2, 2, 3), [0.25, 0.5, 1.0]), gain=2.0)
+    assert pixels[0, 0].tolist() == [186, 255, 255]
+
+
+def test_rgb_gain_one_matches_default() -> None:
+    array = filled((2, 2, 3), [0.25, 0.5, 1.0])
+    np.testing.assert_array_equal(render("rgb_hwc", array), render("rgb_hwc", array, gain=1.0))
+
+
+def test_non_finite_gain_is_rejected() -> None:
+    with pytest.raises(BadParam):
+        render("rgb_hwc", filled((2, 2, 3), [0.25, 0.5, 1.0]), gain=float("nan"))
+
+
 def test_chw_layout_is_transposed() -> None:
     array = np.zeros((3, 2, 2), dtype=np.float32)
     array[0] = 1.0
@@ -105,6 +120,11 @@ def test_gainmap_halves_after_clipping_to_two() -> None:
     assert pixels[0, 0].tolist() == [136, 186, 255]
 
 
+def test_gainmap_gain_scales_before_clip() -> None:
+    pixels = render("hdr_gainmap", filled((2, 2, 3), [0.5, 1.0, 2.0]), gain=2.0)
+    assert pixels[0, 0].tolist() == [186, 255, 255]
+
+
 def test_gainmap_clips_above_two() -> None:
     pixels = render("hdr_gainmap", filled((2, 2, 3), [3.0, 9.0, 2.0]))
     assert pixels[0, 0].tolist() == [255, 255, 255]
@@ -162,6 +182,13 @@ def test_normalize_maps_min_and_max_to_the_full_range() -> None:
     array = np.linspace(100.0, 200.0, 144, dtype=np.float32).reshape(12, 12)
     pixels = render("depth_raw", array, normalize=True)
     assert pixels.min() == 0
+    assert pixels.max() == 255
+
+
+def test_gray_gain_applies_after_normalize() -> None:
+    array = np.linspace(100.0, 200.0, 144, dtype=np.float32).reshape(12, 12)
+    pixels = render("depth_raw", array, normalize=True, gain=2.0)
+    assert pixels[0, 0] == 0
     assert pixels.max() == 255
 
 

@@ -4,7 +4,7 @@ import { isImageReady, releaseImage, retainImage } from "../lib/imageCache";
 import { loadSibling } from "../lib/navCache";
 import { ensureUrls, urlsFor, type SequenceOp } from "../lib/sequenceFrames";
 import { useCompareStore } from "../store/useCompareStore";
-import type { Gamut } from "../lib/types";
+import type { Gamut, ViewOptions } from "../lib/types";
 
 const PREFETCH = 12;
 
@@ -38,6 +38,7 @@ export function useSequencePlayback(args: {
   gamut: Gamut;
   enabled: boolean;
   op?: SequenceOp | null;
+  optionsByKey?: Record<string, Partial<ViewOptions>>;
 }): void {
   const playing = useCompareStore((state) => state.sequence.playing);
   const fps = useCompareStore((state) => state.sequence.fps);
@@ -47,9 +48,13 @@ export function useSequencePlayback(args: {
   const keysRef = useRef(args.keys);
   keysRef.current = args.keys;
   const op = args.op ?? null;
-  const opKey = op ? `${op.id}\0${op.left}\0${op.right}` : "";
+  const opKey = op ? `${op.id}\0${op.left}\0${op.right}\0${op.gain ?? 1}` : "";
   const opRef = useRef(op);
   opRef.current = op;
+  const optionsByKey = args.optionsByKey;
+  const optionsKey = JSON.stringify(optionsByKey ?? {});
+  const optionsRef = useRef(optionsByKey);
+  optionsRef.current = optionsByKey;
 
   // Prefetch the nearest missing frames only. Waiting on the whole window used
   // to stall the playhead whenever a far frame was slow.
@@ -75,7 +80,7 @@ export function useSequencePlayback(args: {
           if (cancelled) return;
           const file = await loadSibling(anchor, index);
           if (cancelled) return;
-          const urls = urlsFor(file, keys, gamut, opRef.current);
+          const urls = urlsFor(file, keys, gamut, opRef.current, optionsRef.current);
           windowUrls.push(...urls);
           if (nearestMissing === null && !urls.every(isImageReady)) nearestMissing = urls;
         }
@@ -91,7 +96,7 @@ export function useSequencePlayback(args: {
       cancelled = true;
       pinned = syncPins(pinned, []);
     };
-  }, [args.enabled, args.path, args.gamut, keysKey, opKey, start, end, playing]);
+  }, [args.enabled, args.path, args.gamut, keysKey, opKey, optionsKey, start, end, playing]);
 
   // Advance one playhead per painted frame. Cached frames used to resolve in the
   // same turn; React batched those updates and the UI jumped several files.
@@ -132,7 +137,7 @@ export function useSequencePlayback(args: {
         const next = current + 1;
         try {
           const file = await loadSibling(anchor, next);
-          const urls = urlsFor(file, keysRef.current, gamut, opRef.current);
+          const urls = urlsFor(file, keysRef.current, gamut, opRef.current, optionsRef.current);
           if (!urls.every(isImageReady)) await ensureUrls(urls);
           if (stopped) return;
           const wait = due - performance.now();
@@ -160,5 +165,5 @@ export function useSequencePlayback(args: {
     return () => {
       stopped = true;
     };
-  }, [args.enabled, args.path, args.gamut, playing, fps, start, end, opKey]);
+  }, [args.enabled, args.path, args.gamut, playing, fps, start, end, opKey, keysKey, optionsKey]);
 }

@@ -154,6 +154,7 @@ class ExportKey(BaseModel):
     colormap: Colormap = "none"
     alpha: AlphaMode = "composite"
     gainmap_gamut: bool = False
+    gain: float = 1.0
 
     @model_validator(mode="after")
     def require_identity(self) -> ExportKey:

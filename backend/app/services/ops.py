@@ -24,7 +24,7 @@ from .render import (
 
 DIVIDE_EPS = np.float32(1e-6)
 # Bump when apply/align/encode semantics change so disk render cache drops old PNGs.
-OP_CACHE_VERSION = 2
+OP_CACHE_VERSION = 3
 
 ApplyFn = Callable[
     [npt.NDArray[np.float32], npt.NDArray[np.float32]], npt.NDArray[np.float32]
@@ -98,6 +98,7 @@ class OpParams:
     gamut: str = "bt2020"
     colormap: str = "none"
     gainmap_gamut: bool = False
+    gain: float = 1.0
     max_size: int = 0
     fmt: str = "png"
     quality: int = 88
@@ -189,6 +190,7 @@ def op_pixels(values: npt.NDArray[np.float32], params: OpParams) -> npt.NDArray[
             is_gainmap=is_gainmap,
             normalize=False,
             colormap=params.colormap,
+            gain=params.gain,
         )
     return render_color_plane(
         values,
@@ -196,6 +198,7 @@ def op_pixels(values: npt.NDArray[np.float32], params: OpParams) -> npt.NDArray[
         gamut=params.gamut,
         gainmap_gamut=params.gainmap_gamut,
         alpha_mode="rgb",
+        gain=params.gain,
     )
 
 

@@ -4,7 +4,7 @@ import { Download, Film, Pause, Play, Locate } from "lucide-react";
 import { api, versionOf } from "../../lib/api";
 import { dirname } from "../../lib/format";
 import { clearNavCache, loadSibling, peekSibling } from "../../lib/navCache";
-import { ensureUrls, frameReady, urlsFor } from "../../lib/sequenceFrames";
+import { ensureUrls, frameReady, urlsFor, type SequenceOp } from "../../lib/sequenceFrames";
 import { useHotkeys } from "../../hooks/useHotkeys";
 import { rangeReady, useSequencePlayback } from "../../hooks/useSequencePlayback";
 import { useAppStore } from "../../store/useAppStore";
@@ -34,10 +34,11 @@ export function SequenceBar({
   viewport: Viewport;
   measureTile: () => { width: number; height: number };
   naturalSizes: { width: number; height: number }[];
-  op?: { id: string; left: string; right: string } | null;
+  op?: SequenceOp | null;
   exportCells?: VideoExportKey[];
 }) {
   const sequence = useCompareStore((state) => state.sequence);
+  const insideOptions = useCompareStore((state) => state.insideOptions);
   const setSequence = useCompareStore((state) => state.setSequence);
   const resetSequence = useCompareStore((state) => state.resetSequence);
   const exitSequence = useCompareStore((state) => state.exitSequence);
@@ -49,6 +50,8 @@ export function SequenceBar({
   keysRef.current = keys;
   const opRef = useRef(op);
   opRef.current = op;
+  const optionsRef = useRef(insideOptions);
+  optionsRef.current = insideOptions;
   const gamutRef = useRef(gamut);
   gamutRef.current = gamut;
   const pathRef = useRef(path);
@@ -81,6 +84,7 @@ export function SequenceBar({
     gamut,
     enabled: keys.length > 0 && sequence.engaged,
     op,
+    optionsByKey: insideOptions,
   });
 
   const locateQuery = useQuery({
@@ -114,7 +118,7 @@ export function SequenceBar({
     try {
       const file = await loadSibling(anchor, index);
       if (gen !== seekGen.current) return;
-      await ensureUrls(urlsFor(file, keysRef.current, gamutRef.current, opRef.current));
+      await ensureUrls(urlsFor(file, keysRef.current, gamutRef.current, opRef.current, optionsRef.current));
       if (gen !== seekGen.current) return;
       const latest = useCompareStore.getState().sequence;
       if (!latest.engaged || latest.playhead !== index) return;
@@ -139,7 +143,7 @@ export function SequenceBar({
     // this path — dragging through the prefetch window would flash every hit.
     if (!defer && !restamp) {
       const cached = peekSibling(pathRef.current, index);
-      if (cached && frameReady(cached, keysRef.current, gamutRef.current, opRef.current)) {
+      if (cached && frameReady(cached, keysRef.current, gamutRef.current, opRef.current, optionsRef.current)) {
         setSequence({
           engaged: true,
           playing,

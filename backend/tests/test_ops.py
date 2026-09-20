@@ -131,6 +131,21 @@ def test_mul_renders_as_linear() -> None:
     assert pixels[0, 0].tolist() == [255, 255, 255]
 
 
+def test_op_display_gain_scales_result_not_operands() -> None:
+    values = filled((2, 2, 3), [0.25, 0.25, 0.25])
+    plain = op_pixels(
+        values, OpParams(op="mul", left=OperandParams("a"), right=OperandParams("b"))
+    )
+    gained = op_pixels(
+        values,
+        OpParams(op="mul", left=OperandParams("a"), right=OperandParams("b"), gain=2.0),
+    )
+    assert plain[0, 0].tolist() == [136, 136, 136]
+    assert gained[0, 0].tolist() == [186, 186, 186]
+    ratio = apply_operator("mul", values, filled((2, 2, 3), [1.0, 1.0, 1.0]))
+    np.testing.assert_allclose(ratio[0, 0], [0.25, 0.25, 0.25])
+
+
 def test_pixel_readout_is_unclipped() -> None:
     num = filled((2, 2, 1), [3.0])
     den = filled((2, 2, 1), [1.0])
@@ -199,6 +214,26 @@ def test_op_render_and_pixel(client, frame) -> None:
     assert pixel.status_code == 200
     body = pixel.json()
     assert len(body["values"]) == 3
+
+
+def test_op_render_gain_changes_png_not_pixel(client, frame) -> None:
+    base = {
+        "op": "mul",
+        "path_a": frame.as_posix(),
+        "key_a": "rgb_hwc",
+        "key_b": "rgb_chw",
+    }
+    plain = client.get("/api/npz/op/render", params=base)
+    gained = client.get("/api/npz/op/render", params={**base, "gain": 2})
+    assert plain.status_code == 200
+    assert gained.status_code == 200
+    assert plain.content != gained.content
+    pixel = client.get(
+        "/api/npz/op/pixel",
+        params={**base, "x": 0, "y": 0},
+    )
+    assert pixel.status_code == 200
+    assert len(pixel.json()["values"]) == 3
 
 
 def test_ratio_alias_still_divides(client, frame) -> None:

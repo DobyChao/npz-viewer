@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { ChevronLeft, ChevronRight, FileQuestion, Layers, X } from "lucide-react";
 import { renderUrl, opRenderUrl } from "../../lib/api";
@@ -7,6 +7,7 @@ import { usePanZoom } from "../../hooks/usePanZoom";
 import { useAppStore } from "../../store/useAppStore";
 import { useCompareStore } from "../../store/useCompareStore";
 import type { Viewport } from "../../store/useCompareStore";
+import { formatGain, parseGain } from "../../lib/types";
 import type { ViewOptions } from "../../lib/types";
 import { ErrorBox, IconButton, Spinner } from "../ui";
 
@@ -43,6 +44,50 @@ function layerStyle(viewport: Viewport, scaleFactor: number): React.CSSPropertie
   };
 }
 
+function TileGainInput({
+  value,
+  onCommit,
+}: {
+  value: number;
+  onCommit: (gain: number) => void;
+}) {
+  const [text, setText] = useState(formatGain(value));
+  useEffect(() => {
+    setText(formatGain(value));
+  }, [value]);
+
+  const commit = (raw: string) => {
+    const next = parseGain(raw, value);
+    onCommit(next);
+    setText(formatGain(next));
+  };
+
+  return (
+    <label
+      className="pointer-events-auto absolute bottom-1 left-1 z-10 flex items-center gap-0.5 rounded bg-black/65 px-1 py-0.5"
+      title="显示增益：线性值 × 此数后再 clip。不改变文件数值或算子计算。"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <span className="text-[10px] text-zinc-500">×</span>
+      <input
+        data-testid="tile-gain"
+        className="w-10 bg-transparent text-right font-mono text-[11px] text-zinc-200 tabular-nums outline-none"
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={(event) => commit(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commit(event.currentTarget.value);
+            event.currentTarget.blur();
+          }
+        }}
+      />
+    </label>
+  );
+}
+
 export function CompareTile({
   spec,
   viewport,
@@ -56,6 +101,7 @@ export function CompareTile({
   onRemove,
   onMoveEarlier,
   onMoveLater,
+  onGainChange,
 }: {
   spec: TileSpec;
   viewport: Viewport;
@@ -70,6 +116,7 @@ export function CompareTile({
   onRemove?: () => void;
   onMoveEarlier?: () => void;
   onMoveLater?: () => void;
+  onGainChange?: (gain: number) => void;
 }) {
   const gamut = useAppStore((state) => state.gamut);
   const setViewport = useCompareStore((state) => state.setViewport);
@@ -94,6 +141,7 @@ export function CompareTile({
         },
         gamut,
         version: target.version,
+        gain: target.options.gain,
       });
     }
     return renderUrl({
@@ -175,6 +223,7 @@ export function CompareTile({
       ref={panZoom.containerRef}
       data-testid="compare-tile"
       data-key={spec.key}
+      data-gain={String(spec.options.gain)}
       data-derived={spec.derived ? "true" : undefined}
       data-overlay={overlay ? (overlay.hidden ? "hidden" : "on") : undefined}
       className="checkerboard relative min-h-0 min-w-0 cursor-grab overflow-hidden border border-zinc-800 active:cursor-grabbing"
@@ -285,6 +334,7 @@ export function CompareTile({
           </IconButton>
         )}
       </div>
+      {onGainChange && <TileGainInput value={spec.options.gain} onCommit={onGainChange} />}
     </div>
   );
 }

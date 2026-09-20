@@ -451,6 +451,38 @@ test("cross-file op operands disambiguate the same key by path", async ({ page }
   await expect(options.nth(1)).toHaveText(/rgb_hwc · .*method_a/);
 });
 
+test("compare tiles apply independent display gain", async ({ page }) => {
+  await selectSampleFrame(page);
+  await openInsideCompare(page, ["rgb_hwc", "gainmap"]);
+
+  const first = page.getByTestId("compare-tile").first();
+  const second = page.getByTestId("compare-tile").nth(1);
+  const firstGain = first.getByTestId("tile-gain");
+  await expect(firstGain).toHaveValue("1");
+  await expect(second.getByTestId("tile-gain")).toHaveValue("1");
+
+  const gained = page.waitForRequest(
+    (request) => request.url().includes("/api/npz/render") && /[?&]gain=2(?:&|$)/.test(request.url()),
+  );
+  await firstGain.fill("2");
+  await firstGain.blur();
+  const gainedUrl = (await gained).url();
+  expect(gainedUrl).toMatch(/[?&]key=rgb_hwc(?:&|$)/);
+  expect(gainedUrl).toMatch(/[?&]gain=2(?:&|$)/);
+  await expect(first).toHaveAttribute("data-gain", "2");
+  await expect(second).toHaveAttribute("data-gain", "1");
+
+  await page.getByTestId("op-toggle").click();
+  const derived = page.locator('[data-testid="compare-tile"][data-derived="true"]');
+  await expect(derived.getByTestId("tile-gain")).toHaveValue("1");
+  const opGained = page.waitForRequest(
+    (request) => request.url().includes("/api/npz/op/render") && /[?&]gain=0\.5(?:&|$)/.test(request.url()),
+  );
+  await derived.getByTestId("tile-gain").fill("0.5");
+  await derived.getByTestId("tile-gain").blur();
+  expect((await opGained).url()).toMatch(/[?&]gain=0\.5(?:&|$)/);
+});
+
 test("browsing produces no console errors or failed requests", async ({ page }) => {
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];

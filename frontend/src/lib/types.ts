@@ -133,6 +133,7 @@ export interface VideoExportKey {
   colormap: string;
   alpha: string;
   gainmap_gamut: boolean;
+  gain?: number;
 }
 
 export interface VideoExportRequest {
@@ -187,6 +188,8 @@ export interface ViewOptions {
   colormap: Colormap;
   alpha: AlphaMode;
   gainmapGamut: boolean;
+  /** Linear × gain, then the existing clip. 1 is a no-op. Does not change pixel readout. */
+  gain: number;
 }
 
 export const DEFAULT_VIEW_OPTIONS: ViewOptions = {
@@ -196,4 +199,18 @@ export const DEFAULT_VIEW_OPTIONS: ViewOptions = {
   colormap: "none",
   alpha: "composite",
   gainmapGamut: false,
+  gain: 1,
 };
+
+export function formatGain(gain: number): string {
+  if (!Number.isFinite(gain)) return "1";
+  const rounded = Math.round(gain * 1000) / 1000;
+  return String(rounded);
+}
+
+export function parseGain(text: string, fallback: number): number {
+  const trimmed = text.trim();
+  if (!trimmed) return fallback;
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? value : fallback;
+}

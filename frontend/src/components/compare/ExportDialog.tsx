@@ -96,6 +96,7 @@ export function ExportDialog({
           colormap: DEFAULT_VIEW_OPTIONS.colormap,
           alpha: DEFAULT_VIEW_OPTIONS.alpha,
           gainmap_gamut: DEFAULT_VIEW_OPTIONS.gainmapGamut,
+          gain: DEFAULT_VIEW_OPTIONS.gain,
         })),
       start,
       end,

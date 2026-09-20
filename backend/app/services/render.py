@@ -24,7 +24,7 @@ RAW_REPR_LIMIT = 2048
 
 MIME_BY_FORMAT = {"png": "image/png", "webp": "image/webp"}
 # Bump when pixel semantics change so disk render/thumb caches do not serve old PNGs.
-RENDER_CACHE_VERSION = 2
+RENDER_CACHE_VERSION = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +38,7 @@ class RenderParams:
     colormap: str = "none"
     gainmap_gamut: bool = False
     alpha: str = "composite"
+    gain: float = 1.0
     max_size: int = 0
     fmt: str = "png"
     quality: int = 88
@@ -103,6 +104,16 @@ def _finite(array: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
 # ---------------------------------------------------------------------------
 
 
+def apply_display_gain(values: npt.NDArray[np.float32], gain: float) -> npt.NDArray[np.float32]:
+    """Viewing exposure: scale linear values. 1 is a no-op. Rejects NaN/Inf."""
+    if not math.isfinite(gain):
+        raise BadParam("gain 必须是有限数字")
+    factor = np.float32(gain)
+    if factor == np.float32(1.0):
+        return values
+    return _finite(values * factor)
+
+
 def render_color_plane(
     hwc: npt.NDArray[np.float32],
     *,
@@ -110,6 +121,7 @@ def render_color_plane(
     gamut: str,
     gainmap_gamut: bool,
     alpha_mode: str,
+    gain: float = 1.0,
 ) -> npt.NDArray[np.uint8]:
     rgb = _finite(hwc[..., :3])
     alpha = hwc[..., 3] if hwc.shape[-1] >= 4 else None
@@ -122,6 +134,7 @@ def render_color_plane(
     if gamut == "p3" and (not is_gainmap or gainmap_gamut):
         rgb = bt2020_to_p3(rgb)
 
+    rgb = apply_display_gain(rgb, gain)
     rgb = np.clip(rgb, 0.0, 2.0) / 2.0 if is_gainmap else np.clip(rgb, 0.0, 1.0)
 
     pixels = to_uint8(encode_gamma(rgb))
@@ -138,17 +151,19 @@ def render_gray_plane(
     is_gainmap: bool,
     normalize: bool,
     colormap: str,
+    gain: float = 1.0,
 ) -> npt.NDArray[np.uint8]:
     """Masks and single-channel data stay linear on purpose: no gamma is applied."""
     values = _finite(plane)
     if is_gainmap:
-        values = np.clip(values, 0.0, 2.0) / 2.0
+        values = np.clip(apply_display_gain(values, gain), 0.0, 2.0) / 2.0
     elif normalize:
         low = float(values.min())
         high = float(values.max())
         values = (values - low) / (high - low) if high > low else np.zeros_like(values)
+        values = np.clip(apply_display_gain(values, gain), 0.0, 1.0)
     else:
-        values = np.clip(values, 0.0, 1.0)
+        values = np.clip(apply_display_gain(values, gain), 0.0, 1.0)
 
     if colormap != "none":
         return colormaps.apply(values, colormap)
@@ -170,6 +185,7 @@ def pixels_for(array: npt.NDArray, meta: KeyMeta, params: RenderParams) -> npt.N
             is_gainmap=False,
             normalize=params.normalize,
             colormap=params.colormap,
+            gain=params.gain,
         )
 
     if channels == 1:
@@ -178,6 +194,7 @@ def pixels_for(array: npt.NDArray, meta: KeyMeta, params: RenderParams) -> npt.N
             is_gainmap=is_gainmap,
             normalize=params.normalize,
             colormap=params.colormap,
+            gain=params.gain,
         )
 
     if channels in (3, 4):
@@ -187,6 +204,7 @@ def pixels_for(array: npt.NDArray, meta: KeyMeta, params: RenderParams) -> npt.N
             gamut=params.gamut,
             gainmap_gamut=params.gainmap_gamut,
             alpha_mode=params.alpha,
+            gain=params.gain,
         )
 
     raise UnsupportedKind(f"不支持的通道数: {channels}")

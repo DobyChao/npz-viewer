@@ -209,6 +209,7 @@ def render_key_image(path: Path, spec: ExportKey, gamut: str) -> Image.Image | N
         colormap=spec.colormap,
         gainmap_gamut=spec.gainmap_gamut,
         alpha=spec.alpha,
+        gain=spec.gain,
     )
     try:
         meta = npzio.find_key(path, spec.key)
@@ -238,6 +239,7 @@ def render_op_image(path: Path, spec: ExportKey, gamut: str) -> Image.Image | No
         gamut=gamut,
         colormap=spec.colormap,
         gainmap_gamut=spec.gainmap_gamut,
+        gain=spec.gain,
     )
     try:
         values = ops.op_array(path, params.left, path, params.right, params.op)
@@ -261,9 +263,10 @@ def cell_label(spec: ExportKey) -> str:
 
 
 def cell_token(spec: ExportKey) -> str:
+    gain = "" if spec.gain == 1 else f"x{spec.gain:g}"
     if spec.type == "op":
-        return f"{spec.op}{spec.key_a}{spec.key_b}"
-    return spec.key
+        return f"{spec.op}{spec.key_a}{spec.key_b}{gain}"
+    return f"{spec.key}{gain}"
 
 
 def prepare_cells(

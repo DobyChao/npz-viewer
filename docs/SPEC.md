@@ -109,12 +109,13 @@ elif dtype in (float16, float32, float64): pass   # 已是 linear 0~1 语义
    - **必须在 clip 之前**，这样超范围通道的能量会先混进目标色域，再按目标空间裁切
    - `gamut=bt2020` 时不做任何矩阵变换
    - **gainmap 默认不做色域变换**（它是比值图不是色度量），卡片上提供开关允许强制转换
-4. clip：
+4. **显示增益**（对比格 `ViewOptions.gain`，默认 1）：`rgb = rgb * gain`。只影响 PNG，不写回数组，不进入算子运算，也不改变 `/pixel` 读数。
+5. clip：
    - 普通图：`rgb = clip(rgb, 0, 1)`
    - gainmap：`rgb = clip(rgb, 0, 2) / 2`
-5. gamma 编码：`out = rgb ** (1/2.2)`（纯 power function，不是 sRGB 分段曲线）
-6. alpha 通道（若有）：只做 `clip(0,1)`，**不参与 gamma、不参与色域变换**
-7. 量化：`uint8(round(out * 255))`，输出 PNG（RGBA 时输出 RGBA PNG，前端用 CSS 棋盘格垫底）
+6. gamma 编码：`out = rgb ** (1/2.2)`（纯 power function，不是 sRGB 分段曲线）
+7. alpha 通道（若有）：只做 `clip(0,1)`，**不参与 gamma、不参与色域变换、不参与 gain**
+8. 量化：`uint8(round(out * 255))`，输出 PNG（RGBA 时输出 RGBA PNG，前端用 CSS 棋盘格垫底）
 
 **色域矩阵不要硬编码**，用原色坐标推导，写在 `backend/app/color.py` 并加单元测试：
 
@@ -141,7 +142,7 @@ M_2020_TO_P3 = inv(rgb_to_xyz(P3D65)) @ rgb_to_xyz(BT2020)
 ### 4.4 灰度 / mask 渲染
 
 1. 归一化（4.2）
-2. `normalize=0`（默认）：`clip(v, 0, 1)`；`normalize=1`：`(v - vmin) / (vmax - vmin)`，vmin/vmax 取该数组实际值
+2. `normalize=0`（默认）：`clip(v * gain, 0, 1)`；`normalize=1`：先 `(v - vmin) / (vmax - vmin)`，再 `clip(v * gain, 0, 1)`。vmin/vmax 取该数组实际值
 3. **不做 gamma**
 4. `colormap=none` → 单通道灰度 PNG；`colormap=viridis|magma|turbo` → 查表映射成 RGB PNG
 5. 卡片上永远显示真实的 `min / max / mean`，不管有没有归一化
@@ -254,12 +255,13 @@ normalize 0 | 1                默认 0，仅对 gray/stack 生效
 colormap  none|viridis|magma|turbo  默认 none
 gainmap_gamut 0|1              默认 0（gainmap 不做色域变换）
 alpha     composite | rgb | alpha    默认 composite（输出 RGBA），rgb=丢弃 alpha，alpha=只输出 alpha 灰度图
+gain      float                默认 1，显示增益（线性 × gain 后再 clip）
 max_size  int，长边上限，0=原尺寸   默认 0
 format    png | webp           默认 png
 v         缓存击穿用的版本串（前端传 `${mtime}_${size}`），后端忽略其值
 ```
 
-`/api/npz/op/render`：`op` 为算子 id（`GET /ops` 列出）；`path_a,key_a` 为左操作数，`path_b,key_b` 为右操作数（`path_b` 缺省= `path_a`）。另有 `batch_a/b`、`layout_a/b`、`channel_a/b`，以及共用的 `gamut`、`colormap`、`gainmap_gamut`、`max_size`、`format`、`v`。后端在线性 float 上对齐后套算子：`H×W` 不同时把像素数较小的那张 bilinear 放到较大的尺寸；一彩一灰则把灰 broadcast 成 3 通道。
+`/api/npz/op/render`：`op` 为算子 id（`GET /ops` 列出）；`path_a,key_a` 为左操作数，`path_b,key_b` 为右操作数（`path_b` 缺省= `path_a`）。另有 `batch_a/b`、`layout_a/b`、`channel_a/b`，以及共用的 `gamut`、`colormap`、`gainmap_gamut`、`gain`、`max_size`、`format`、`v`。`gain` 只作用于算子**结果**的显示管线，操作数本身的 gain 不进入运算。后端在线性 float 上对齐后套算子：`H×W` 不同时把像素数较小的那张 bilinear 放到较大的尺寸；一彩一灰则把灰 broadcast 成 3 通道。
 
 当前算子：
 
@@ -272,7 +274,7 @@ v         缓存击穿用的版本串（前端传 `${mtime}_${size}`），后端
 
 带 `v=` 的响应头必须是 `Cache-Control: public, max-age=31536000, immutable` 和 `ETag`（= 缓存 key 的 hash），并正确处理 `If-None-Match` 返回 304。没有 `v=` 时改为 `private, max-age=0, must-revalidate`（序列播放漏传版本时不能把改写后的 npz 锁进浏览器缓存）。
 
-文件内序列播放的 render URL **必须**带当前帧的 `v=`（来自 `/nav/at` 对该文件的 live stat，而不是 dirindex 快照）。前端 `imageCache` 以完整 URL 为键；刷新目录会 bump render epoch 并清空 navCache。
+文件内序列播放的 render URL **必须**带当前帧的 `v=`（来自 `/nav/at` 对该文件的 live stat，而不是 dirindex 快照），以及各对比格当时的 `gain` 等 ViewOptions。前端 `imageCache` 以完整 URL 为键；刷新目录会 bump render epoch 并清空 navCache。
 
 **错误约定**：统一 `{"detail": {"code": "...", "message": "...", "hint": "..."}}`，HTTP 状态用 400/403/404/415/500。`code` 至少包含 `PATH_OUTSIDE_ROOT`、`FILE_NOT_FOUND`、`KEY_NOT_FOUND`、`UNSUPPORTED_KIND`、`NEEDS_PICKLE`、`BAD_PARAM`。
 
@@ -390,7 +392,7 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 - A/B toggle：开启后只显示一个 tile，按 `空格` 在已选项之间循环切换（含算子格），用于像素级闪烁对比。切换时**不重置 viewport**。
 - **临时算子**：至少 2 张、不满 4 张源瓦片时可开。可选手册里的算子（默认除法）以及对比列表中任意两格。默认 **第 2 格 ÷ 第 1 格**（与覆盖 `2 → 1` 同一对）。结果追加一格虚拟瓦片，不写回 npz。点该格移除只关算子。源瓦片满 4 张时按钮禁用。覆盖始终叠到第 1 格；覆盖源可以是第 1 格以外的任意格（含算子格）。除法按 gainmap 展示，乘法按线性 RGB 展示。
 - 源瓦片可前移/后移（算子格始终在最后）。重排后算子操作数和覆盖源按身份跟随原图：文件内用 key，跨文件用 `(npz路径, key)`。若覆盖源被排到第 1 格，改选第 2 格。操作数下拉在 key 冲突或多文件时带上文件名（文件名也冲突则带上末两级路径）。
-- 每个 tile 左上角显示标签 `npz文件名 / key`，右上角有前移/后移（仅源格）和移除按钮。
+- 每个 tile 左上角显示标签 `npz文件名 / key`，右上角有前移/后移（仅源格）和移除按钮。左下角 `× 1` 是该格自己的显示增益（可各不相同；默认 1）。源格和算子格各自独立。覆盖层用覆盖源格已经带 gain 的 PNG。像素读数仍是文件线性值。
 - 顶部导航：`◀ 上一个 npz / 下一个 npz ▶`（同目录内）、`◀ 上级文件夹 / 下级 ▶`（兄弟文件夹里相同序号的 npz）。
 - **文件内模式跨文件跟随**：切到新 npz 后，用相同的 key 名重新构造 tile；如果新 npz 里没有这个 key，该位置渲染 `NotFoundTile` 占位（灰底 + `KEY NOT FOUND: <key>`），**不要塌陷布局**。
 - 鼠标悬停时在工具栏显示当前像素坐标和原始数值（调 `/api/npz/pixel`，节流 100ms）。
@@ -439,7 +441,7 @@ thumbPreferKeys: string[], thumbEnabled, pageSize, panelSizes, gamut, colormap, 
 `POST /api/video/export` body：
 
 ```
-path, keys:[{type?: key|op, op?, key, key_a?, key_b?, batch, layout, channel, normalize, colormap, alpha, gainmap_gamut}],
+path, keys:[{type?: key|op, op?, key, key_a?, key_b?, batch, layout, channel, normalize, colormap, alpha, gainmap_gamut, gain?}],
 gamut, start, end, fps, layout, crop: full|viewport, max_size, equal_height,
 confirm_large, save_dir?, viewport?: {scale,x,y,tile_width,tile_height,natural_sizes:[{width,height}]}
 ```
@@ -550,3 +552,4 @@ confirm_large, save_dir?, viewport?: {scale,x,y,tile_width,tile_height,natural_s
 | 2026-09-01 | 拖 scrubber 等到目标帧就绪才换图 | 拖过预取窗口会先闪中间缓存帧再跳到目标 |
 | 2026-09-15 | 桌面客户端原生多 WebView 标签，每标签独立 hub session / 后端；发布壳 UI 端口临时分配 | 多远端并行对比；避免固定占用 5273 |
 | 2026-09-17 | 远端连接先 health/占用探测，同用户已有后端则复用；连接可中断；venv 已能导入则跳过 pip | 避免每次连都卡在装依赖；坏网时不应反复失败 |
+| 2026-09-20 | 对比格 per-tile 显示增益（`ViewOptions.gain`） | 线性 × gain 后再 clip；不进算子运算、不改 pixel 读数；控件只在对比格 |

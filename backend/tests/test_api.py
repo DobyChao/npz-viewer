@@ -137,6 +137,17 @@ def test_render_gamut_changes_the_bytes(client: TestClient, frame: Path) -> None
     assert native != converted
 
 
+def test_render_gain_changes_png_not_pixel(client: TestClient, frame: Path) -> None:
+    base = {"path": frame.as_posix(), "key": "rgb_hwc"}
+    plain = client.get("/api/npz/render", params=base).content
+    gained = client.get("/api/npz/render", params={**base, "gain": 2}).content
+    assert plain != gained
+    pixel = client.get(
+        "/api/npz/pixel", params={"path": frame.as_posix(), "key": "rgb_hwc", "x": 0, "y": 0}
+    ).json()
+    assert len(pixel["values"]) == 3
+
+
 def test_render_rejects_non_renderable_keys(client: TestClient, frame: Path) -> None:
     response = client.get("/api/npz/render", params={"path": frame.as_posix(), "key": "iso"})
     assert response.status_code == 415

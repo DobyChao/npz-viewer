@@ -72,6 +72,7 @@ export function ComparePanel() {
   const mode = useCompareStore((state) => state.mode);
   const items = useCompareStore((state) => state.items);
   const insideKeys = useCompareStore((state) => state.insideKeys);
+  const insideOptions = useCompareStore((state) => state.insideOptions);
   const layout = useCompareStore((state) => state.layout);
   const setLayout = useCompareStore((state) => state.setLayout);
   const toggleIndex = useCompareStore((state) => state.toggleIndex);
@@ -87,6 +88,7 @@ export function ComparePanel() {
   const opId = useCompareStore((state) => state.opId);
   const opLeft = useCompareStore((state) => state.opLeft);
   const opRight = useCompareStore((state) => state.opRight);
+  const opOptions = useCompareStore((state) => state.opOptions);
   const toggleOp = useCompareStore((state) => state.toggleOp);
   const setOpId = useCompareStore((state) => state.setOpId);
   const setOpLeft = useCompareStore((state) => state.setOpLeft);
@@ -104,6 +106,9 @@ export function ComparePanel() {
   const actualToken = useCompareStore((state) => state.actualToken);
   const removeItem = useCompareStore((state) => state.removeItem);
   const toggleInsideKey = useCompareStore((state) => state.toggleInsideKey);
+  const patchItemOptions = useCompareStore((state) => state.patchItemOptions);
+  const patchInsideOptions = useCompareStore((state) => state.patchInsideOptions);
+  const patchOpOptions = useCompareStore((state) => state.patchOpOptions);
   const showPixelReadout = useCompareStore((state) => state.showPixelReadout);
   const sequence = useCompareStore((state) => state.sequence);
   const gamut = useAppStore((state) => state.gamut);
@@ -161,12 +166,12 @@ export function ComparePanel() {
         npzPath: tilePath ?? path,
         npzName: tileName,
         version: tileVersion,
-        options: DEFAULT_VIEW_OPTIONS,
+        options: { ...DEFAULT_VIEW_OPTIONS, ...insideOptions[key] },
         missing: tilePath != null && tileMeta.path === tilePath ? !keyMeta?.renderable : false,
         removable: true,
       };
     });
-  }, [mode, items, insideKeys, path, meta, version, tileMeta, tilePath, tileName, tileVersion]);
+  }, [mode, items, insideKeys, insideOptions, path, meta, version, tileMeta, tilePath, tileName, tileVersion]);
 
   const opAllowed = canEnableOp(tiles.length);
   const leftIndex = clampOperand(opLeft, tiles.length);
@@ -184,13 +189,13 @@ export function ComparePanel() {
         npzPath: left.npzPath,
         npzName: left.npzPath === right.npzPath ? left.npzName : `${left.npzName} / ${right.npzName}`,
         version: `${left.version}|${right.version}`,
-        options: DEFAULT_VIEW_OPTIONS,
+        options: opOptions,
         missing: left.missing || right.missing,
         removable: true,
         derived: { op: opId, left, right },
       },
     ];
-  }, [tiles, opEnabled, opAllowed, opId, leftIndex, rightIndex]);
+  }, [tiles, opEnabled, opAllowed, opId, leftIndex, rightIndex, opOptions]);
 
   const signature = displayTiles.map((tile) => tile.id).join("|");
   const visibleTiles =
@@ -610,6 +615,11 @@ export function ComparePanel() {
                   ? () => moveSource(sourceIndex, sourceIndex + 1)
                   : undefined
               }
+              onGainChange={(gain) => {
+                if (tile.derived) patchOpOptions({ gain });
+                else if (mode === "inside") patchInsideOptions(tile.key, { gain });
+                else patchItemOptions(tile.id, { gain });
+              }}
             />
             );
           })}
@@ -637,6 +647,7 @@ export function ComparePanel() {
                   id: opId,
                   left: tiles[leftIndex]?.key ?? "",
                   right: tiles[rightIndex]?.key ?? "",
+                  gain: opOptions.gain,
                 }
               : null
           }
@@ -655,6 +666,7 @@ export function ComparePanel() {
                   colormap: DEFAULT_VIEW_OPTIONS.colormap,
                   alpha: DEFAULT_VIEW_OPTIONS.alpha,
                   gainmap_gamut: DEFAULT_VIEW_OPTIONS.gainmapGamut,
+                  gain: tile.options.gain,
                 }
               : {
                   type: "key",
@@ -666,6 +678,7 @@ export function ComparePanel() {
                   colormap: tile.options.colormap,
                   alpha: tile.options.alpha,
                   gainmap_gamut: tile.options.gainmapGamut,
+                  gain: tile.options.gain,
                 },
           )}
         />

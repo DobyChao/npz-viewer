@@ -118,6 +118,7 @@ async def npz_render(
     colormap: Colormap = "none",
     gainmap_gamut: bool = False,
     alpha: AlphaMode = "composite",
+    gain: float = Query(1.0, description="显示增益：线性值 × gain 后再 clip；不改变 pixel 读数"),
     max_size: int = Query(0, ge=0, le=16384),
     fmt: ImageFormat = Query("png", alias="format"),
     v: str = Query("", description="缓存击穿用的版本串，服务端忽略"),
@@ -133,6 +134,7 @@ async def npz_render(
         colormap=colormap,
         gainmap_gamut=gainmap_gamut,
         alpha=alpha,
+        gain=gain,
         max_size=max_size,
         fmt=fmt,
     )
@@ -193,6 +195,7 @@ def _op_params(
     channel_b: int,
     colormap: Colormap,
     gainmap_gamut: bool,
+    gain: float,
     max_size: int,
     fmt: ImageFormat,
 ) -> ops.OpParams:
@@ -203,6 +206,7 @@ def _op_params(
         gamut=gamut,
         colormap=colormap,
         gainmap_gamut=gainmap_gamut,
+        gain=gain,
         max_size=max_size,
         fmt=fmt,
     )
@@ -230,6 +234,7 @@ async def op_render(
     channel_b: int = Query(0, ge=0),
     colormap: Colormap = "none",
     gainmap_gamut: bool = False,
+    gain: float = Query(1.0, description="算子结果的显示增益，不进入运算"),
     max_size: int = Query(0, ge=0, le=16384),
     fmt: ImageFormat = Query("png", alias="format"),
     v: str = Query("", description="缓存击穿用的版本串，服务端忽略"),
@@ -249,6 +254,7 @@ async def op_render(
         channel_b,
         colormap,
         gainmap_gamut,
+        gain,
         max_size,
         fmt,
     )
@@ -302,6 +308,7 @@ async def ratio_render(
     channel_b: int = Query(0, ge=0),
     colormap: Colormap = "none",
     gainmap_gamut: bool = False,
+    gain: float = Query(1.0),
     max_size: int = Query(0, ge=0, le=16384),
     fmt: ImageFormat = Query("png", alias="format"),
     v: str = Query("", description="缓存击穿用的版本串，服务端忽略"),
@@ -322,6 +329,7 @@ async def ratio_render(
         channel_b=channel_b,
         colormap=colormap,
         gainmap_gamut=gainmap_gamut,
+        gain=gain,
         max_size=max_size,
         fmt=fmt,
         v=v,

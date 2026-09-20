@@ -72,6 +72,8 @@ interface CompareState {
   items: CompareItem[];
   /** Key names selected in inside mode; deliberately survives switching npz. */
   insideKeys: string[];
+  /** Per-key display options in inside mode (gain, etc.). Survives switching npz. */
+  insideOptions: Record<string, ViewOptions>;
   layout: CompareLayout;
   toggleIndex: number | null;
   /**
@@ -105,6 +107,8 @@ interface CompareState {
   opLeft: number;
   /** 0-based source-tile index of the right operand. Default 0 (tile 1). */
   opRight: number;
+  /** Display options for the derived operator tile (gain is independent of operands). */
+  opOptions: ViewOptions;
   panel: ComparePanelState;
   /** Last split height of the compare pane, as a percentage of the right column. */
   splitComparePercent: number;
@@ -123,6 +127,9 @@ interface CompareState {
   clearItems: () => void;
   toggleInsideKey: (key: string) => void;
   setInsideKeys: (keys: string[]) => void;
+  patchItemOptions: (id: string, patch: Partial<ViewOptions>) => void;
+  patchInsideOptions: (key: string, patch: Partial<ViewOptions>) => void;
+  patchOpOptions: (patch: Partial<ViewOptions>) => void;
   /** Reorder source tiles. Operator operands and overlay source follow identity, not slot. */
   moveSource: (from: number, to: number) => void;
   setLayout: (layout: CompareLayout) => void;
@@ -200,6 +207,7 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   mode: "cross",
   items: [],
   insideKeys: [],
+  insideOptions: {},
   layout: "auto",
   toggleIndex: null,
   overlayEnabled: false,
@@ -210,6 +218,7 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
   opId: DEFAULT_OP_ID,
   opLeft: 1,
   opRight: 0,
+  opOptions: { ...DEFAULT_VIEW_OPTIONS },
   panel: "hidden",
   splitComparePercent: 45,
   viewport: IDENTITY_VIEWPORT,
@@ -227,6 +236,8 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
       opId: DEFAULT_OP_ID,
       opLeft: 1,
       opRight: 0,
+      insideOptions: {},
+      opOptions: { ...DEFAULT_VIEW_OPTIONS },
       sequence: clearedSequence(state.sequence.fps),
     })),
 
@@ -265,8 +276,12 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
         : state.insideKeys.length >= MAX_COMPARE_ITEMS
           ? state.insideKeys
           : [...state.insideKeys, key];
+      const insideOptions = Object.fromEntries(
+        Object.entries(state.insideOptions).filter(([name]) => insideKeys.includes(name)),
+      );
       return {
         insideKeys,
+        insideOptions,
         ...RESET_TILE_VIEWS,
         opEnabled: keepOp(insideKeys.length, state.opEnabled),
         ...clampPair(state.opLeft, state.opRight, insideKeys.length),
@@ -276,13 +291,37 @@ export const useCompareStore = create<CompareState>()((set, get) => ({
     }),
 
   setInsideKeys: (keys) =>
+    set((state) => {
+      const insideKeys = keys.slice(0, MAX_COMPARE_ITEMS);
+      return {
+        insideKeys,
+        insideOptions: Object.fromEntries(
+          Object.entries(state.insideOptions).filter(([name]) => insideKeys.includes(name)),
+        ),
+        ...RESET_TILE_VIEWS,
+        opEnabled: keepOp(insideKeys.length, state.opEnabled),
+        ...clampPair(state.opLeft, state.opRight, insideKeys.length),
+        sequence: insideKeys.length === 0 ? clearedSequence(state.sequence.fps) : state.sequence,
+      };
+    }),
+
+  patchItemOptions: (id, patch) =>
     set((state) => ({
-      insideKeys: keys.slice(0, MAX_COMPARE_ITEMS),
-      ...RESET_TILE_VIEWS,
-      opEnabled: keepOp(Math.min(keys.length, MAX_COMPARE_ITEMS), state.opEnabled),
-      ...clampPair(state.opLeft, state.opRight, Math.min(keys.length, MAX_COMPARE_ITEMS)),
-      sequence: keys.length === 0 ? clearedSequence(state.sequence.fps) : state.sequence,
+      items: state.items.map((item) =>
+        item.id === id ? { ...item, options: { ...item.options, ...patch } } : item,
+      ),
     })),
+
+  patchInsideOptions: (key, patch) =>
+    set((state) => ({
+      insideOptions: {
+        ...state.insideOptions,
+        [key]: { ...DEFAULT_VIEW_OPTIONS, ...state.insideOptions[key], ...patch },
+      },
+    })),
+
+  patchOpOptions: (patch) =>
+    set((state) => ({ opOptions: { ...state.opOptions, ...patch } })),
 
   moveSource: (from, to) =>
     set((state) => {
