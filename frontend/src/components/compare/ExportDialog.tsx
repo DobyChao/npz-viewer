@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { dirname } from "../../lib/format";
 import { formatOpKeys } from "../../lib/ops";
+import { useT } from "../../i18n";
 import type { CompareLayout, Gamut, VideoCrop, VideoExportKey, VideoExportRequest } from "../../lib/types";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
 import type { Viewport } from "../../store/useCompareStore";
@@ -45,6 +46,7 @@ export function ExportDialog({
   naturalSizes: { width: number; height: number }[];
   onClose: () => void;
 }) {
+  const t = useT();
   const [crop, setCrop] = useState<VideoCrop>("full");
   const [maxSize, setMaxSize] = useState("1920");
   const [exportFps, setExportFps] = useState(String(fps));
@@ -129,7 +131,7 @@ export function ExportDialog({
   };
 
   return (
-    <Modal title="导出对比视频" onClose={onClose} width="max-w-md">
+    <Modal title={t("export.title")} onClose={onClose} width="max-w-md">
       <div className="space-y-4 text-xs">
         <p className="text-zinc-400">
           {(cells ?? keys).map((cell) =>
@@ -139,36 +141,36 @@ export function ExportDialog({
                 ? formatOpKeys(cell.op ?? "div", cell.key_a ?? "", cell.key_b ?? "")
                 : cell.key,
           ).join(" · ")}{" "}
-          · {frameCount} 帧 · 宫格{" "}
+          {t("export.summary", { n: frameCount })}{" "}
           <span className="font-mono text-zinc-300">{layout}</span>
         </p>
 
         <label className="block">
-          <span className="mb-1 block text-zinc-500">画面</span>
+          <span className="mb-1 block text-zinc-500">{t("export.picture")}</span>
           <Segmented
             value={crop}
             onChange={setCrop}
             options={[
-              { value: "full", label: "完整原图" },
+              { value: "full", label: t("export.full") },
               {
                 value: "viewport",
-                label: "当前视口",
-                title: viewportOk ? "按对比面板当前缩放/平移裁剪" : "格子尺寸过小",
+                label: t("export.viewport"),
+                title: viewportOk ? t("export.viewportTitle") : t("export.viewportTooSmall"),
               },
             ]}
           />
         </label>
         {crop === "viewport" && !viewportOk && (
-          <p className="text-amber-400">对比格子还没有尺寸，请先让面板显示出来再导出视口。</p>
+          <p className="text-amber-400">{t("export.viewportNeedSize")}</p>
         )}
 
         <label className="block">
-          <span className="mb-1 block text-zinc-500">长边上限</span>
+          <span className="mb-1 block text-zinc-500">{t("export.maxSize")}</span>
           <Select value={maxSize} options={[...SIZE_OPTIONS]} onChange={setMaxSize} />
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-zinc-500">帧率</span>
+          <span className="mb-1 block text-zinc-500">{t("export.fps")}</span>
           <input
             type="number"
             min={1}
@@ -180,7 +182,7 @@ export function ExportDialog({
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-zinc-500">保存到目录（服务器路径）</span>
+          <span className="mb-1 block text-zinc-500">{t("export.saveDir")}</span>
           <input
             data-testid="export-save-dir"
             value={saveDir}
@@ -189,7 +191,7 @@ export function ExportDialog({
             className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-[11px] text-zinc-200"
           />
           <p className="mt-1 text-[10px] text-zinc-600">
-            写成磁盘路径，不经过浏览器文件选择器。无界面环境也能写完。
+            {t("export.saveHint")}
           </p>
         </label>
 
@@ -197,7 +199,7 @@ export function ExportDialog({
           <Checkbox
             checked={confirmLarge}
             onChange={setConfirmLarge}
-            label={`确认导出 ${frameCount} 帧（超过 ${SOFT_LIMIT}）`}
+            label={t("export.confirmLarge", { n: frameCount, limit: SOFT_LIMIT })}
           />
         )}
 
@@ -208,13 +210,13 @@ export function ExportDialog({
         {job && (job.status === "queued" || job.status === "running") && (
           <div className="flex items-center gap-2 text-zinc-400">
             <Spinner />
-            编码 {job.current} / {job.total}
+            {t("export.encoding", { current: job.current, total: job.total })}
           </div>
         )}
 
         {done && (
           <div className="space-y-2 rounded border border-zinc-800 bg-zinc-950 p-2 text-zinc-300">
-            <p>已写入</p>
+            <p>{t("export.written")}</p>
             <p data-testid="export-saved-path" className="break-all font-mono text-[11px] text-cyan-300">
               {job.saved_path ?? job.filename}
             </p>
@@ -228,7 +230,7 @@ export function ExportDialog({
                     });
                   }}
                 >
-                  {copied ? "已复制" : "复制路径"}
+                  {copied ? t("common.copied") : t("export.copyPath")}
                 </Button>
               )}
               {jobId && (
@@ -238,7 +240,7 @@ export function ExportDialog({
                   rel="noreferrer"
                   className="inline-flex items-center rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800"
                 >
-                  在浏览器中打开
+                  {t("export.openBrowser")}
                 </a>
               )}
             </div>
@@ -252,10 +254,10 @@ export function ExportDialog({
                 if (jobId) void api.cancelVideoJob(jobId);
               }}
             >
-              取消编码
+              {t("export.cancelEncode")}
             </Button>
           ) : (
-            <Button onClick={onClose}>关闭</Button>
+            <Button onClick={onClose}>{t("common.close")}</Button>
           )}
           <Button
             variant="solid"
@@ -264,7 +266,7 @@ export function ExportDialog({
             }
             onClick={startExport}
           >
-            开始导出
+            {t("export.start")}
           </Button>
         </div>
       </div>

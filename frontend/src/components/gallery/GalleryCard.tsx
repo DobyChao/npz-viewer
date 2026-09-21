@@ -8,6 +8,7 @@ import { useInView } from "../../hooks/useInView";
 import { useImageResource } from "../../hooks/useImageResource";
 import { useAppStore } from "../../store/useAppStore";
 import { useCompareStore } from "../../store/useCompareStore";
+import { translateNote, useT } from "../../i18n";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
 import type { KeyKind, KeyMeta, ViewOptions } from "../../lib/types";
 import { Button, ErrorBox, IconButton, Spinner } from "../ui";
@@ -36,6 +37,7 @@ export function GalleryCard({
   version: string;
   meta: KeyMeta;
 }) {
+  const t = useT();
   const globalGamut = useAppStore((state) => state.gamut);
   const openLightbox = useAppStore((state) => state.openLightbox);
   const addItem = useCompareStore((state) => state.addItem);
@@ -94,13 +96,13 @@ export function GalleryCard({
             onClick={() =>
               src && openLightbox({ path, version, key: meta.name, options })
             }
-            title="点击放大"
+            title={t("gallery.clickZoom")}
           >
             {src && (
               <img src={src} alt={meta.name} className="max-h-full max-w-full object-contain" />
             )}
             {!src && state === "loading" && <Spinner />}
-            {!src && state === "idle" && <div className="text-[11px] text-zinc-700">等待载入</div>}
+            {!src && state === "idle" && <div className="text-[11px] text-zinc-700">{t("gallery.waiting")}</div>}
             {state === "error" && error && (
               <div className="max-w-full p-2">
                 <ErrorBox error={error} compact />
@@ -134,12 +136,12 @@ export function GalleryCard({
               <Button
                 title={
                   compareMode === "inside"
-                    ? "当前是文件内对比模式，请在上方勾选 key"
+                    ? t("gallery.compareInside")
                     : inCompare
-                      ? "已在对比面板中"
+                      ? t("gallery.compareAdded")
                       : compareFull
-                        ? "对比面板最多 4 张"
-                        : "加入对比"
+                        ? t("gallery.compareFull")
+                        : t("gallery.compareAdd")
                 }
                 active={inCompare}
                 disabled={compareMode === "inside" || (compareFull && !inCompare)}
@@ -153,10 +155,10 @@ export function GalleryCard({
                   })
                 }
               >
-                <Columns2 size={13} /> 对比
+                <Columns2 size={13} /> {t("gallery.compare")}
               </Button>
               <IconButton
-                title="全屏查看"
+                title={t("gallery.fullscreen")}
                 disabled={!src}
                 onClick={() => openLightbox({ path, version, key: meta.name, options })}
               >
@@ -171,7 +173,7 @@ export function GalleryCard({
 
       {meta.note && (
         <div className="border-t border-zinc-800/60 px-2.5 py-1 text-[10px] text-zinc-600">
-          {meta.note}
+          {translateNote(meta.note, t)}
         </div>
       )}
     </div>

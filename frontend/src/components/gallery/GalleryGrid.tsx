@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import { useCurrentNpz } from "../../hooks/useCurrentNpz";
+import { useT } from "../../i18n";
 import { EmptyState, ErrorBox, SectionHeader, Spinner } from "../ui";
 import { GalleryCard } from "./GalleryCard";
 
@@ -7,6 +8,7 @@ import { GalleryCard } from "./GalleryCard";
 let savedScrollTop = 0;
 
 export function GalleryGrid() {
+  const t = useT();
   const { path, meta, version, isLoading, error } = useCurrentNpz();
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -32,14 +34,14 @@ export function GalleryGrid() {
 
   return (
     <div className="flex h-full flex-col">
-      <SectionHeader title={meta ? `Gallery · ${meta.keys.length} 个 key` : "Gallery"}>
+      <SectionHeader title={meta ? t("gallery.titleCount", { n: meta.keys.length }) : t("gallery.title")}>
         {isLoading && <Spinner className="h-3 w-3" />}
       </SectionHeader>
 
       <div ref={scrollRef} data-testid="gallery-scroll" className="min-h-0 flex-1 overflow-auto p-3">
-        {!path && <EmptyState>选择一个 npz 后，这里会逐 key 展示可视化结果</EmptyState>}
+        {!path && <EmptyState>{t("gallery.emptySelect")}</EmptyState>}
         {error ? <ErrorBox error={error} /> : null}
-        {path && meta && meta.keys.length === 0 && <EmptyState>该 npz 没有任何 key</EmptyState>}
+        {path && meta && meta.keys.length === 0 && <EmptyState>{t("gallery.emptyKeys")}</EmptyState>}
         {path && meta && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3">
             {meta.keys.map((key) => (

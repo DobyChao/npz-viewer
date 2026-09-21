@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { ChevronDown, ChevronRight, Folder, FolderOpen, RefreshCw } from "lucide-react";
 import { api } from "../lib/api";
 import { invalidateAfterFsRefresh } from "../lib/refresh";
+import { useT } from "../i18n";
 import { useAppStore } from "../store/useAppStore";
 import { Checkbox, EmptyState, ErrorBox, IconButton, SectionHeader, Spinner, TextInput } from "./ui";
 
@@ -122,6 +123,7 @@ function TreeNode({
 }
 
 export function FolderTree() {
+  const t = useT();
   const queryClient = useQueryClient();
   const rootId = useAppStore((state) => state.rootId);
   const currentDir = useAppStore((state) => state.currentDir);
@@ -140,9 +142,9 @@ export function FolderTree() {
 
   return (
     <div className="flex h-full flex-col bg-zinc-900/30">
-      <SectionHeader title="文件夹">
+      <SectionHeader title={t("folder.title")}>
         <IconButton
-          title="刷新当前目录（R）"
+          title={t("folder.refresh")}
           onClick={() => refresh.mutate()}
           disabled={refresh.isPending}
         >
@@ -159,7 +161,7 @@ export function FolderTree() {
             depth={0}
           />
         ) : (
-          <EmptyState>请先在顶栏添加并选择一个 root</EmptyState>
+          <EmptyState>{t("folder.pickRoot")}</EmptyState>
         )}
       </div>
 
@@ -167,7 +169,7 @@ export function FolderTree() {
         <Checkbox
           checked={autoOpen.enabled}
           onChange={(enabled) => setAutoOpen({ enabled })}
-          label="切换文件夹时自动打开第"
+          label={t("folder.autoOpenPrefix")}
         />
         <TextInput
           type="number"
@@ -179,7 +181,7 @@ export function FolderTree() {
           }
           className="w-14"
         />
-        <span className="text-xs text-zinc-500">个</span>
+        <span className="text-xs text-zinc-500">{t("folder.autoOpenSuffix")}</span>
       </div>
     </div>
   );

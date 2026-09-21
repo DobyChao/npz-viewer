@@ -14,6 +14,7 @@ export default defineConfig({
     // would otherwise try ::1 first and spawn a second, port-conflicting server.
     baseURL: `http://127.0.0.1:${PORT}`,
     viewport: { width: 1600, height: 1000 },
+    locale: "zh-CN",
     trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

@@ -9,6 +9,7 @@ import { useHotkeys } from "../../hooks/useHotkeys";
 import { rangeReady, useSequencePlayback } from "../../hooks/useSequencePlayback";
 import { useAppStore } from "../../store/useAppStore";
 import { useCompareStore } from "../../store/useCompareStore";
+import { useT } from "../../i18n";
 import type { CompareLayout, Gamut, VideoExportKey } from "../../lib/types";
 import { Button, IconButton } from "../ui";
 import { ExportDialog } from "./ExportDialog";
@@ -37,6 +38,7 @@ export function SequenceBar({
   op?: SequenceOp | null;
   exportCells?: VideoExportKey[];
 }) {
+  const t = useT();
   const sequence = useCompareStore((state) => state.sequence);
   const insideOptions = useCompareStore((state) => state.insideOptions);
   const setSequence = useCompareStore((state) => state.setSequence);
@@ -267,7 +269,7 @@ export function SequenceBar({
       }`}
     >
       <IconButton
-        title={sequence.engaged ? "退出序列（对比跟随文件列表）" : "进入序列（对比跟随 playhead）"}
+        title={sequence.engaged ? t("seq.exit") : t("seq.enter")}
         data-testid="sequence-engage"
         active={sequence.engaged}
         onClick={() => {
@@ -278,11 +280,11 @@ export function SequenceBar({
         <Film size={13} />
       </IconButton>
       <span className="shrink-0 font-medium" data-testid="sequence-source">
-        {sequence.engaged ? "序列" : "列表"}
+        {sequence.engaged ? t("seq.sequence") : t("seq.list")}
       </span>
 
       <IconButton
-        title={sequence.playing ? "暂停（P）" : "播放（P）"}
+        title={sequence.playing ? t("seq.pause") : t("seq.play")}
         data-testid="sequence-play"
         disabled={!rangeReady(sequence.start, sequence.end)}
         active={sequence.playing}
@@ -292,7 +294,7 @@ export function SequenceBar({
       </IconButton>
 
       <label className="flex items-center gap-1">
-        起
+        {t("seq.start")}
         <input
           data-testid="sequence-start"
           type="number"
@@ -309,7 +311,7 @@ export function SequenceBar({
       </label>
 
       <label className="flex items-center gap-1">
-        止
+        {t("seq.end")}
         <input
           data-testid="sequence-end"
           type="number"
@@ -363,7 +365,7 @@ export function SequenceBar({
       </label>
 
       <Button
-        title="把文件列表跳到 playhead 对应的 npz"
+        title={t("seq.locateTitle")}
         disabled={!sequence.engaged || sequence.playhead === null || !(sequence.playPath || playName.data)}
         onClick={() => {
           const file = sequence.playPath
@@ -372,16 +374,16 @@ export function SequenceBar({
           if (file) jumpToFile(file.path, file.index);
         }}
       >
-        <Locate size={12} /> 定位
+        <Locate size={12} /> {t("seq.locate")}
       </Button>
 
       <Button
         data-testid="sequence-export"
         disabled={!canExport}
-        title={canExport ? "导出宫格 MP4" : "先选起止帧"}
+        title={canExport ? t("seq.exportTitle") : t("seq.exportNeedRange")}
         onClick={() => setExportOpen(true)}
       >
-        <Download size={12} /> 导出
+        <Download size={12} /> {t("seq.export")}
       </Button>
 
       {exportOpen && canExport && sequence.start !== null && sequence.end !== null && (

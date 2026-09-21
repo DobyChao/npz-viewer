@@ -6,12 +6,14 @@ import { useImageResource } from "../../hooks/useImageResource";
 import { usePanZoom } from "../../hooks/usePanZoom";
 import { useCurrentNpz } from "../../hooks/useCurrentNpz";
 import { useAppStore } from "../../store/useAppStore";
+import { useT } from "../../i18n";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
 import { IDENTITY_VIEWPORT } from "../../store/useCompareStore";
 import type { Viewport } from "../../store/useCompareStore";
 import { ErrorBox, IconButton, Spinner } from "../ui";
 
 export function Lightbox() {
+  const t = useT();
   const target = useAppStore((state) => state.lightbox);
   const close = useAppStore((state) => state.closeLightbox);
   const openLightbox = useAppStore((state) => state.openLightbox);
@@ -109,14 +111,14 @@ export function Lightbox() {
         </span>
 
         <div className="ml-auto flex items-center gap-1">
-          <IconButton title="上一个 key（←）" onClick={() => step(-1)}>
+          <IconButton title={t("lightbox.prevKey")} onClick={() => step(-1)}>
             <ChevronLeft size={14} />
           </IconButton>
-          <IconButton title="下一个 key（→）" onClick={() => step(1)}>
+          <IconButton title={t("lightbox.nextKey")} onClick={() => step(1)}>
             <ChevronRight size={14} />
           </IconButton>
           <IconButton
-            title="适应窗口"
+            title={t("lightbox.fit")}
             onClick={() => size && panZoom.fit(size.width, size.height)}
           >
             <Scan size={14} />
@@ -124,7 +126,7 @@ export function Lightbox() {
           <IconButton title="100%" onClick={panZoom.actualSize}>
             <Maximize size={14} />
           </IconButton>
-          <IconButton title="关闭（Esc）" onClick={close}>
+          <IconButton title={t("lightbox.close")} onClick={close}>
             <X size={14} />
           </IconButton>
         </div>

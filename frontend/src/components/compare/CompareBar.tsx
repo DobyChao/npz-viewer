@@ -6,15 +6,11 @@ import { useImageResource } from "../../hooks/useImageResource";
 import { useAppStore } from "../../store/useAppStore";
 import { MAX_COMPARE_ITEMS, useCompareStore } from "../../store/useCompareStore";
 import type { CompareItem } from "../../store/useCompareStore";
-import type { CompareMode } from "../../lib/types";
+import { useT } from "../../i18n";
 import { Button, IconButton, Segmented } from "../ui";
 
-const MODE_OPTIONS: { value: CompareMode; label: string; title: string }[] = [
-  { value: "cross", label: "跨文件", title: "从任意 npz 的 gallery 卡片加入图片进行对比" },
-  { value: "inside", label: "文件内", title: "勾选当前 npz 的 key，切换 npz 时保持勾选" },
-];
-
 function Chip({ item }: { item: CompareItem }) {
+  const t = useT();
   const gamut = useAppStore((state) => state.gamut);
   const removeItem = useCompareStore((state) => state.removeItem);
   const { src } = useImageResource(
@@ -39,7 +35,7 @@ function Chip({ item }: { item: CompareItem }) {
         <div className="truncate font-mono text-[11px] text-zinc-300">{item.key}</div>
         <div className="truncate text-[10px] text-zinc-600">{item.npzName}</div>
       </div>
-      <IconButton title="移除" className="h-5 w-5" onClick={() => removeItem(item.id)}>
+      <IconButton title={t("common.remove")} className="h-5 w-5" onClick={() => removeItem(item.id)}>
         <X size={11} />
       </IconButton>
     </div>
@@ -47,6 +43,7 @@ function Chip({ item }: { item: CompareItem }) {
 }
 
 export function CompareBar() {
+  const t = useT();
   const { meta } = useCurrentNpz();
   const mode = useCompareStore((state) => state.mode);
   const setMode = useCompareStore((state) => state.setMode);
@@ -66,8 +63,17 @@ export function CompareBar() {
   return (
     <div className="shrink-0 border-b border-zinc-800 bg-zinc-900/40 px-3 py-1.5">
       <div className="flex items-center gap-2">
-        <span className="shrink-0 text-[11px] tracking-wide text-zinc-500 uppercase">对比</span>
-        <Segmented value={mode} options={MODE_OPTIONS} onChange={setMode} />
+        <span className="shrink-0 text-[11px] tracking-wide text-zinc-500 uppercase">
+          {t("compare.section")}
+        </span>
+        <Segmented
+          value={mode}
+          options={[
+            { value: "cross", label: t("compare.cross"), title: t("compare.crossTitle") },
+            { value: "inside", label: t("compare.inside"), title: t("compare.insideTitle") },
+          ]}
+          onChange={setMode}
+        />
 
         <span className="shrink-0 text-[11px] text-zinc-600 tabular-nums">
           {selectedCount} / {MAX_COMPARE_ITEMS}
@@ -75,17 +81,17 @@ export function CompareBar() {
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {mode === "cross" && items.length > 0 && (
-            <Button onClick={clearItems} title="清空对比列表">
-              <Trash2 size={13} /> 清空
+            <Button onClick={clearItems} title={t("compare.clearList")}>
+              <Trash2 size={13} /> {t("compare.clear")}
             </Button>
           )}
           {mode === "inside" && insideKeys.length > 0 && (
-            <Button onClick={() => setInsideKeys([])} title="取消全部勾选">
-              <Trash2 size={13} /> 清空
+            <Button onClick={() => setInsideKeys([])} title={t("compare.clearKeys")}>
+              <Trash2 size={13} /> {t("compare.clear")}
             </Button>
           )}
           <IconButton
-            title={panel === "hidden" ? "显示对比面板" : "隐藏对比面板"}
+            title={panel === "hidden" ? t("compare.showPanel") : t("compare.hidePanel")}
             data-testid="compare-panel-toggle"
             active={panel !== "hidden"}
             onClick={() => setPanel(panel === "hidden" ? "split" : "hidden")}
@@ -99,7 +105,7 @@ export function CompareBar() {
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {items.length === 0 ? (
             <span className="text-[11px] text-zinc-600">
-              在下方 gallery 卡片上点「对比」加入图片，最多 4 张，可以来自不同的 npz。
+              {t("compare.crossHint")}
             </span>
           ) : (
             items.map((item) => <Chip key={item.id} item={item} />)
@@ -116,7 +122,7 @@ export function CompareBar() {
               data-testid="inside-key-missing"
               data-key={name}
               onClick={() => toggleInsideKey(name)}
-              title="当前 npz 没有这个 key，点击移除"
+              title={t("compare.missingKey")}
               className="rounded border border-dashed border-amber-700/80 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[11px] text-amber-400 hover:border-amber-500 hover:bg-amber-500/20"
             >
               {name}
@@ -124,7 +130,7 @@ export function CompareBar() {
             </button>
           ))}
           {renderableKeys.length === 0 && missingSelected.length === 0 ? (
-            <span className="text-[11px] text-zinc-600">当前 npz 没有可渲染的 key。</span>
+            <span className="text-[11px] text-zinc-600">{t("compare.noRenderable")}</span>
           ) : (
             renderableKeys.map((key) => {
               const checked = insideKeys.includes(key.name);
@@ -137,7 +143,7 @@ export function CompareBar() {
                   data-key={key.name}
                   disabled={full}
                   onClick={() => toggleInsideKey(key.name)}
-                  title={full ? `最多勾选 ${MAX_COMPARE_ITEMS} 个` : key.name}
+                  title={full ? t("compare.maxKeys", { n: MAX_COMPARE_ITEMS }) : key.name}
                   className={clsx(
                     "rounded border px-1.5 py-0.5 font-mono text-[11px] transition-colors",
                     checked
@@ -153,7 +159,7 @@ export function CompareBar() {
           )}
           {insideKeys.length > 0 && (
             <span className="ml-2 self-center text-[11px] text-zinc-600">
-              切换 npz 时会保持勾选，找不到的 key 可点掉移除
+              {t("compare.keepSelection")}
             </span>
           )}
         </div>

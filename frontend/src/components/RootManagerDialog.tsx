@@ -2,9 +2,11 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderPlus, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
+import { useT } from "../i18n";
 import { Button, ErrorBox, Modal, Spinner, TextInput } from "./ui";
 
 export function RootManagerDialog({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["roots"], queryFn: api.roots });
   const [name, setName] = useState("");
@@ -29,13 +31,15 @@ export function RootManagerDialog({ onClose }: { onClose: () => void }) {
   const roots = data?.roots ?? [];
 
   return (
-    <Modal title="管理 root" onClose={onClose} width="max-w-2xl">
+    <Modal title={t("roots.title")} onClose={onClose} width="max-w-2xl">
       <div className="flex min-h-0 flex-1 flex-col gap-4">
         <p className="shrink-0 text-xs text-zinc-500">
-          root 保存在后端的 <code className="text-zinc-400">roots.json</code>
-          ，也可以直接编辑该文件，后端会自动热加载。路径必须是绝对路径，Windows 形如
-          <code className="text-zinc-400"> D:/data</code>，Linux 形如
-          <code className="text-zinc-400"> /mnt/data</code>。
+          {t("roots.intro1")} <code className="text-zinc-400">roots.json</code>
+          {t("roots.intro2")}
+          <code className="text-zinc-400"> D:/data</code>
+          {t("roots.intro3")}
+          <code className="text-zinc-400"> /mnt/data</code>
+          {t("roots.intro4")}
         </p>
 
         <div
@@ -44,11 +48,11 @@ export function RootManagerDialog({ onClose }: { onClose: () => void }) {
         >
           {isLoading && (
             <div className="flex items-center gap-2 p-3 text-xs text-zinc-500">
-              <Spinner /> 加载中
+              <Spinner /> {t("common.loading")}
             </div>
           )}
           {!isLoading && roots.length === 0 && (
-            <div className="p-3 text-xs text-zinc-600">还没有配置任何 root。</div>
+            <div className="p-3 text-xs text-zinc-600">{t("roots.empty")}</div>
           )}
           {roots.map((root) => (
             <div
@@ -61,14 +65,14 @@ export function RootManagerDialog({ onClose }: { onClose: () => void }) {
               </div>
               {!root.exists && (
                 <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-400">
-                  目录不存在
+                  {t("roots.missing")}
                 </span>
               )}
               <Button
                 variant="danger"
                 onClick={() => remove.mutate(root.id)}
                 disabled={remove.isPending}
-                title="移除"
+                title={t("common.remove")}
               >
                 <Trash2 size={13} />
               </Button>
@@ -78,16 +82,16 @@ export function RootManagerDialog({ onClose }: { onClose: () => void }) {
 
         <div className="flex shrink-0 items-end gap-2">
           <label className="flex-1">
-            <span className="mb-1 block text-[11px] text-zinc-500">显示名（可留空）</span>
+            <span className="mb-1 block text-[11px] text-zinc-500">{t("roots.displayName")}</span>
             <TextInput
               className="w-full"
               value={name}
-              placeholder="例如：实验结果"
+              placeholder={t("roots.displayPlaceholder")}
               onChange={(event) => setName(event.target.value)}
             />
           </label>
           <label className="flex-[2]">
-            <span className="mb-1 block text-[11px] text-zinc-500">绝对路径</span>
+            <span className="mb-1 block text-[11px] text-zinc-500">{t("roots.absPath")}</span>
             <TextInput
               className="w-full font-mono"
               value={path}
@@ -104,7 +108,7 @@ export function RootManagerDialog({ onClose }: { onClose: () => void }) {
             disabled={!path.trim() || add.isPending}
             onClick={() => add.mutate()}
           >
-            <FolderPlus size={13} /> 添加
+            <FolderPlus size={13} /> {t("common.add")}
           </Button>
         </div>
 

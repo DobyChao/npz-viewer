@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { dirname } from "../lib/format";
+import { detectLocale, isLocale, type Locale } from "../i18n/locale";
 import type { Gamut, SortField, SortOrder, ViewOptions } from "../lib/types";
 
 export interface LightboxTarget {
@@ -28,6 +29,7 @@ interface AppState {
   list: ListPrefs;
   thumbs: { enabled: boolean; prefer: string };
   lightbox: LightboxTarget | null;
+  locale: Locale;
 
   setRoot: (id: string | null, path: string | null) => void;
   setDir: (path: string) => void;
@@ -40,6 +42,7 @@ interface AppState {
   setThumbs: (patch: Partial<{ enabled: boolean; prefer: string }>) => void;
   openLightbox: (target: LightboxTarget) => void;
   closeLightbox: () => void;
+  setLocale: (locale: Locale) => void;
 }
 
 const DEFAULT_LIST: ListPrefs = {
@@ -61,6 +64,7 @@ export const useAppStore = create<AppState>()(
       list: DEFAULT_LIST,
       thumbs: { enabled: true, prefer: "rgb,output,result,pred" },
       lightbox: null,
+      locale: detectLocale(),
 
       setRoot: (id, path) =>
         set({ rootId: id, currentDir: path, currentNpz: null, list: { ...DEFAULT_LIST } }),
@@ -92,10 +96,11 @@ export const useAppStore = create<AppState>()(
       setThumbs: (patch) => set((state) => ({ thumbs: { ...state.thumbs, ...patch } })),
       openLightbox: (target) => set({ lightbox: target }),
       closeLightbox: () => set({ lightbox: null }),
+      setLocale: (locale) => set({ locale }),
     }),
     {
       name: "npz-view.app",
-      version: 1,
+      version: 2,
       partialize: (state) => ({
         rootId: state.rootId,
         currentDir: state.currentDir,
@@ -103,7 +108,15 @@ export const useAppStore = create<AppState>()(
         autoOpen: state.autoOpen,
         thumbs: state.thumbs,
         list: { ...state.list, page: 1, q: "" },
+        locale: state.locale,
       }),
+      migrate: (persisted, version) => {
+        const state = { ...((persisted ?? {}) as Record<string, unknown>) };
+        if (version < 2 && !isLocale(state.locale)) {
+          state.locale = detectLocale();
+        }
+        return state as typeof persisted;
+      },
     },
   ),
 );

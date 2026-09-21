@@ -8,20 +8,12 @@ import { dirname, formatBytes, formatTime } from "../lib/format";
 import { useImageResource } from "../hooks/useImageResource";
 import { useAppStore } from "../store/useAppStore";
 import type { NpzFileInfo, SortField, SortOrder } from "../lib/types";
+import { useT } from "../i18n";
 import { Pagination } from "./Pagination";
 import { CopyButton, EmptyState, ErrorBox, SectionHeader, Select, Spinner, TextInput } from "./ui";
 
 const ROW_HEIGHT = 56;
 const THUMB_SIZE = 96;
-
-const SORT_OPTIONS: { value: `${SortField}:${SortOrder}`; label: string }[] = [
-  { value: "name:asc", label: "名称 ↑" },
-  { value: "name:desc", label: "名称 ↓" },
-  { value: "mtime:desc", label: "修改时间 ↓" },
-  { value: "mtime:asc", label: "修改时间 ↑" },
-  { value: "size:desc", label: "大小 ↓" },
-  { value: "size:asc", label: "大小 ↑" },
-];
 
 function Thumbnail({ item }: { item: NpzFileInfo }) {
   const thumbs = useAppStore((state) => state.thumbs);
@@ -54,6 +46,7 @@ function Thumbnail({ item }: { item: NpzFileInfo }) {
 }
 
 function Row({ item, selected }: { item: NpzFileInfo; selected: boolean }) {
+  const t = useT();
   const setNpz = useAppStore((state) => state.setNpz);
   return (
     <div
@@ -83,7 +76,7 @@ function Row({ item, selected }: { item: NpzFileInfo; selected: boolean }) {
       </div>
       <CopyButton
         value={item.path}
-        title="复制完整路径"
+        title={t("list.copyPath")}
         className="opacity-0 group-hover:opacity-100"
       />
     </div>
@@ -91,6 +84,7 @@ function Row({ item, selected }: { item: NpzFileInfo; selected: boolean }) {
 }
 
 export function NpzList() {
+  const t = useT();
   const currentDir = useAppStore((state) => state.currentDir);
   const currentNpz = useAppStore((state) => state.currentNpz);
   const setNpz = useAppStore((state) => state.setNpz);
@@ -169,15 +163,22 @@ export function NpzList() {
 
   return (
     <div className="flex h-full flex-col bg-zinc-900/30">
-      <SectionHeader title={`npz 列表${isFetching ? " …" : ""}`}>
+      <SectionHeader title={`${t("list.title")}${isFetching ? " …" : ""}`}>
         <Select
           value={`${list.sort}:${list.order}`}
-          options={SORT_OPTIONS}
+          options={[
+            { value: "name:asc", label: t("list.sortNameAsc") },
+            { value: "name:desc", label: t("list.sortNameDesc") },
+            { value: "mtime:desc", label: t("list.sortMtimeDesc") },
+            { value: "mtime:asc", label: t("list.sortMtimeAsc") },
+            { value: "size:desc", label: t("list.sortSizeDesc") },
+            { value: "size:asc", label: t("list.sortSizeAsc") },
+          ]}
           onChange={(value) => {
             const [sort, order] = value.split(":") as [SortField, SortOrder];
             setList({ sort, order });
           }}
-          title="排序方式"
+          title={t("list.sort")}
         />
       </SectionHeader>
 
@@ -185,21 +186,21 @@ export function NpzList() {
         <Search size={12} className="shrink-0 text-zinc-600" />
         <TextInput
           value={search}
-          placeholder="按文件名过滤"
+          placeholder={t("list.filter")}
           onChange={(event) => setSearch(event.target.value)}
           className="w-full"
         />
       </div>
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto px-1">
-        {!currentDir && <EmptyState>请在上方选择一个文件夹</EmptyState>}
+        {!currentDir && <EmptyState>{t("list.pickFolder")}</EmptyState>}
         {error && (
           <div className="p-2">
             <ErrorBox error={error} compact />
           </div>
         )}
         {currentDir && !error && items.length === 0 && (
-          <EmptyState>{list.q ? "没有匹配的 npz" : "该文件夹下没有 npz"}</EmptyState>
+          <EmptyState>{list.q ? t("list.noMatch") : t("list.empty")}</EmptyState>
         )}
         {items.length > 0 && (
           <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>

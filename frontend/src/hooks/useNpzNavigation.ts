@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import { useAppStore } from "../store/useAppStore";
+import { useT } from "../i18n";
 
 export type NavScope = "file" | "folder";
 export type NavDirection = "next" | "prev";
@@ -14,6 +15,7 @@ export type NavDirection = "next" | "prev";
 export function useNpzNavigation() {
   const currentNpz = useAppStore((state) => state.currentNpz);
   const jumpToFile = useAppStore((state) => state.jumpToFile);
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -26,13 +28,13 @@ export function useNpzNavigation() {
         const result = await api.sibling(currentNpz, scope, direction);
         jumpToFile(result.path, result.index);
       } catch (error) {
-        setMessage(error instanceof ApiError ? error.message : "导航失败");
+        setMessage(error instanceof ApiError ? error.message : t("nav.failed"));
         window.setTimeout(() => setMessage(null), 2500);
       } finally {
         setBusy(false);
       }
     },
-    [currentNpz, busy, jumpToFile],
+    [currentNpz, busy, jumpToFile, t],
   );
 
   return { go, busy, message, enabled: Boolean(currentNpz) };

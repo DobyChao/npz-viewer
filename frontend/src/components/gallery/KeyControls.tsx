@@ -8,6 +8,7 @@ import type {
   ViewOptions,
 } from "../../lib/types";
 import { Checkbox, IconButton, Segmented, Select } from "../ui";
+import { useT } from "../../i18n";
 
 const COLOR_KINDS = new Set(["rgb", "rgba", "gainmap"]);
 const GRAY_KINDS = new Set(["gray", "stack"]);
@@ -23,11 +24,12 @@ function Stepper({
   count: number;
   onChange: (value: number) => void;
 }) {
+  const t = useT();
   return (
     <div className="inline-flex items-center gap-0.5 rounded border border-zinc-700 px-1">
       <span className="text-[10px] text-zinc-500">{label}</span>
       <IconButton
-        title="上一个"
+        title={t("key.prev")}
         className="h-5 w-5"
         disabled={value <= 0}
         onClick={() => onChange(value - 1)}
@@ -38,7 +40,7 @@ function Stepper({
         {value + 1}/{count}
       </span>
       <IconButton
-        title="下一个"
+        title={t("key.next")}
         className="h-5 w-5"
         disabled={value >= count - 1}
         onClick={() => onChange(value + 1)}
@@ -58,6 +60,7 @@ export function KeyControls({
   options: ViewOptions;
   onChange: (patch: Partial<ViewOptions>) => void;
 }) {
+  const t = useT();
   const isColor = COLOR_KINDS.has(meta.kind);
   const isGray = GRAY_KINDS.has(meta.kind) || (meta.kind === "gainmap" && meta.channels === 1);
 
@@ -67,7 +70,7 @@ export function KeyControls({
         <Segmented
           value={options.gamut ?? "auto"}
           options={[
-            { value: "auto", label: "跟随", title: "使用顶栏的全局色域设置" },
+            { value: "auto", label: t("key.gamutFollow"), title: t("key.gamutFollowTitle") },
             { value: "bt2020", label: "2020" },
             { value: "p3", label: "P3" },
           ]}
@@ -81,7 +84,7 @@ export function KeyControls({
         <Segmented
           value={options.layout ?? "auto"}
           options={[
-            { value: "auto", label: "自动" },
+            { value: "auto", label: t("common.auto") },
             { value: "chw", label: "CHW" },
             { value: "hwc", label: "HWC" },
           ]}
@@ -102,7 +105,7 @@ export function KeyControls({
 
       {meta.kind === "stack" && meta.channels !== null && (
         <Stepper
-          label="通道"
+          label={t("key.channel")}
           value={options.channel}
           count={meta.channels}
           onChange={(channel) => onChange({ channel })}
@@ -111,12 +114,12 @@ export function KeyControls({
 
       {meta.kind === "rgba" && (
         <Select
-          title="alpha 显示方式"
+          title={t("key.alphaMode")}
           value={options.alpha}
           options={[
-            { value: "composite", label: "带透明" },
-            { value: "rgb", label: "忽略 alpha" },
-            { value: "alpha", label: "只看 alpha" },
+            { value: "composite", label: t("key.alphaComposite") },
+            { value: "rgb", label: t("key.alphaIgnore") },
+            { value: "alpha", label: t("key.alphaOnly") },
           ]}
           onChange={(value) => onChange({ alpha: value as AlphaMode })}
         />
@@ -126,7 +129,7 @@ export function KeyControls({
         <Checkbox
           checked={options.gainmapGamut}
           onChange={(gainmapGamut) => onChange({ gainmapGamut })}
-          label="对 gainmap 也做色域变换"
+          label={t("key.gainmapGamut")}
         />
       )}
 
@@ -135,13 +138,13 @@ export function KeyControls({
           <Checkbox
             checked={options.normalize}
             onChange={(normalize) => onChange({ normalize })}
-            label="min/max 归一化"
+            label={t("key.normalize")}
           />
           <Select
-            title="伪彩色"
+            title={t("key.colormap")}
             value={options.colormap}
             options={[
-              { value: "none", label: "灰度" },
+              { value: "none", label: t("key.gray") },
               { value: "viridis", label: "viridis" },
               { value: "magma", label: "magma" },
               { value: "turbo", label: "turbo" },

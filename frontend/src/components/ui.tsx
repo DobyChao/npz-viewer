@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import clsx from "clsx";
 import { AlertTriangle, Check, Copy, Loader2 } from "lucide-react";
+import { useT } from "../i18n";
 
 export function Spinner({ className }: { className?: string }) {
   return <Loader2 className={clsx("animate-spin text-zinc-500", className)} size={16} />;
@@ -214,7 +215,7 @@ async function writeClipboard(text: string): Promise<void> {
 
 export function CopyButton({
   value,
-  title = "复制",
+  title,
   className,
   children,
 }: {
@@ -223,6 +224,8 @@ export function CopyButton({
   className?: string;
   children?: ReactNode;
 }) {
+  const t = useT();
+  const resolvedTitle = title ?? t("common.copy");
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
 
@@ -242,7 +245,7 @@ export function CopyButton({
   return (
     <Button
       onClick={copy}
-      title={title}
+      title={resolvedTitle}
       className={clsx(copied && "text-emerald-400", className)}
     >
       {copied ? <Check size={13} /> : <Copy size={13} />}
@@ -290,6 +293,16 @@ export function EmptyState({ children }: { children: ReactNode }) {
   );
 }
 
+function ModalHeader({ title, onClose }: { title: string; onClose: () => void }) {
+  const t = useT();
+  return (
+    <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-2.5">
+      <h2 className="text-sm font-medium text-zinc-200">{title}</h2>
+      <Button onClick={onClose}>{t("common.close")}</Button>
+    </div>
+  );
+}
+
 export function Modal({
   title,
   onClose,
@@ -328,10 +341,7 @@ export function Modal({
           width,
         )}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-2.5">
-          <h2 className="text-sm font-medium text-zinc-200">{title}</h2>
-          <Button onClick={onClose}>关闭</Button>
-        </div>
+        <ModalHeader title={title} onClose={onClose} />
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">{children}</div>
       </div>
     </div>

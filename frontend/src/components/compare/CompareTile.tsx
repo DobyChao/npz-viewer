@@ -10,6 +10,7 @@ import type { Viewport } from "../../store/useCompareStore";
 import { formatGain, parseGain } from "../../lib/types";
 import type { ViewOptions } from "../../lib/types";
 import { ErrorBox, IconButton, Spinner } from "../ui";
+import { useT } from "../../i18n";
 
 export interface TileSpec {
   id: string;
@@ -51,6 +52,7 @@ function TileGainInput({
   value: number;
   onCommit: (gain: number) => void;
 }) {
+  const t = useT();
   const [text, setText] = useState(formatGain(value));
   useEffect(() => {
     setText(formatGain(value));
@@ -65,7 +67,7 @@ function TileGainInput({
   return (
     <label
       className="pointer-events-auto absolute bottom-1 left-1 z-10 flex items-center gap-0.5 rounded bg-black/65 px-1 py-0.5"
-      title="显示增益：线性值 × 此数后再 clip。不改变文件数值或算子计算。"
+      title={t("tile.gain")}
       onPointerDown={(event) => event.stopPropagation()}
     >
       <span className="text-[10px] text-zinc-500">×</span>
@@ -118,6 +120,7 @@ export function CompareTile({
   onMoveLater?: () => void;
   onGainChange?: (gain: number) => void;
 }) {
+  const t = useT();
   const gamut = useAppStore((state) => state.gamut);
   const setViewport = useCompareStore((state) => state.setViewport);
   const panZoom = usePanZoom(viewport, setViewport);
@@ -185,7 +188,7 @@ export function CompareTile({
         <div className="absolute top-1 right-1 flex items-center gap-1">
           {onMoveEarlier && (
             <IconButton
-              title="前移（对比顺序）"
+              title={t("tile.moveEarlier")}
               data-testid="move-tile-earlier"
               className="h-5 w-5 bg-black/65"
               onClick={onMoveEarlier}
@@ -195,7 +198,7 @@ export function CompareTile({
           )}
           {onMoveLater && (
             <IconButton
-              title="后移（对比顺序）"
+              title={t("tile.moveLater")}
               data-testid="move-tile-later"
               className="h-5 w-5 bg-black/65"
               onClick={onMoveLater}
@@ -205,7 +208,7 @@ export function CompareTile({
           )}
           {onRemove && (
             <IconButton
-              title="从对比中移除（当前 npz 没有这个 key）"
+              title={t("tile.removeMissing")}
               data-testid="remove-tile"
               className="h-5 w-5 bg-black/65"
               onClick={onRemove}
@@ -254,7 +257,7 @@ export function CompareTile({
       {overlay && overlayImage.src && !overlay.hidden && (
         <img
           src={overlayImage.src}
-          alt={`${overlay.spec.key} 覆盖层`}
+          alt={t("tile.overlayAlt", { key: overlay.spec.key })}
           data-testid="compare-overlay"
           draggable={false}
           className={clsx(viewport.scale * overlay.scaleFactor >= 1.5 && "pixelated")}
@@ -278,7 +281,7 @@ export function CompareTile({
           {index + 1}
           {overlay && ` ← ${overlay.index + 1}`}
         </span>
-        {isOverlaySource && <span className="text-[10px] text-amber-400">覆盖源</span>}
+        {isOverlaySource && <span className="text-[10px] text-amber-400">{t("tile.overlaySource")}</span>}
         <span
           className={clsx(
             "truncate font-mono text-[11px]",
@@ -295,7 +298,7 @@ export function CompareTile({
       <div className="absolute top-1 right-1 flex items-center gap-1">
         {onMoveEarlier && (
           <IconButton
-            title="前移（对比顺序）"
+            title={t("tile.moveEarlier")}
             data-testid="move-tile-earlier"
             className="h-5 w-5 bg-black/65"
             onClick={onMoveEarlier}
@@ -305,7 +308,7 @@ export function CompareTile({
         )}
         {onMoveLater && (
           <IconButton
-            title="后移（对比顺序）"
+            title={t("tile.moveLater")}
             data-testid="move-tile-later"
             className="h-5 w-5 bg-black/65"
             onClick={onMoveLater}
@@ -315,7 +318,7 @@ export function CompareTile({
         )}
         {onPickOverlaySource && (
           <IconButton
-            title="用这一格作为覆盖源"
+            title={t("tile.pickOverlay")}
             data-testid="pick-overlay-source"
             className="h-5 w-5 bg-black/65"
             onClick={onPickOverlaySource}
@@ -325,7 +328,7 @@ export function CompareTile({
         )}
         {onRemove && (
           <IconButton
-            title="从对比中移除"
+            title={t("tile.remove")}
             data-testid="remove-tile"
             className="h-5 w-5 bg-black/65"
             onClick={onRemove}

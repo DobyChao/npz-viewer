@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { formatNumber } from "../../lib/format";
 import type { KeyMeta } from "../../lib/types";
+import { useT } from "../../i18n";
 import { ErrorBox, Spinner } from "../ui";
 
 function ValueGrid({ values }: { values: number[] }) {
@@ -60,6 +61,7 @@ function isTruncatedVector(value: unknown): value is { head: number[]; tail: num
 }
 
 export function DataCard({ path, meta }: { path: string; meta: KeyMeta }) {
+  const t = useT();
   const { data, isLoading, error } = useQuery({
     queryKey: ["npz-data", path, meta.name],
     queryFn: () => api.data(path, meta.name),
@@ -68,7 +70,7 @@ export function DataCard({ path, meta }: { path: string; meta: KeyMeta }) {
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 p-3 text-xs text-zinc-500">
-        <Spinner /> 读取中
+        <Spinner /> {t("common.reading")}
       </div>
     );
   }
@@ -94,11 +96,11 @@ export function DataCard({ path, meta }: { path: string; meta: KeyMeta }) {
       {isTruncatedVector(values) && (
         <div className="space-y-1.5">
           <div>
-            <div className="mb-1 text-[10px] text-zinc-600">前 {values.head.length} 个</div>
+            <div className="mb-1 text-[10px] text-zinc-600">{t("data.head", { n: values.head.length })}</div>
             <ValueGrid values={values.head} />
           </div>
           <div>
-            <div className="mb-1 text-[10px] text-zinc-600">后 {values.tail.length} 个</div>
+            <div className="mb-1 text-[10px] text-zinc-600">{t("data.tail", { n: values.tail.length })}</div>
             <ValueGrid values={values.tail} />
           </div>
         </div>
@@ -115,7 +117,7 @@ export function DataCard({ path, meta }: { path: string; meta: KeyMeta }) {
       )}
 
       {values === null && (
-        <div className="text-xs text-zinc-600">该数组维度过高，仅提供统计信息。</div>
+        <div className="text-xs text-zinc-600">{t("data.tooHighDim")}</div>
       )}
 
       {data.stats && (

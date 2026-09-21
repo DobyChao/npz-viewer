@@ -9,20 +9,25 @@ import {
   type HubState,
   type NewServer,
 } from "../../lib/hub";
+import { useT, type Translator } from "../../i18n";
 import { Button, ErrorBox, Modal, Select, Spinner, TextInput } from "../ui";
 
-const STATE_META: Record<HubServer["state"], { dot: string; label: string }> = {
-  idle: { dot: "bg-zinc-600", label: "未连接" },
-  connecting: { dot: "bg-amber-400 animate-pulse", label: "连接中" },
-  active: { dot: "bg-emerald-500", label: "已连接" },
-  error: { dot: "bg-red-500", label: "出错" },
-};
+function stateMeta(t: Translator): Record<HubServer["state"], { dot: string; label: string }> {
+  return {
+    idle: { dot: "bg-zinc-600", label: t("servers.stateIdle") },
+    connecting: { dot: "bg-amber-400 animate-pulse", label: t("servers.stateConnecting") },
+    active: { dot: "bg-emerald-500", label: t("servers.stateActive") },
+    error: { dot: "bg-red-500", label: t("servers.stateError") },
+  };
+}
 
-const AUTH_OPTIONS: { value: AuthMethod; label: string }[] = [
-  { value: "agent", label: "ssh-agent" },
-  { value: "password", label: "密码" },
-  { value: "key", label: "私钥文件" },
-];
+function authOptions(t: Translator): { value: AuthMethod; label: string }[] {
+  return [
+    { value: "agent", label: "ssh-agent" },
+    { value: "password", label: t("servers.authPassword") },
+    { value: "key", label: t("servers.authKey") },
+  ];
+}
 
 const EMPTY_FORM: NewServer = {
   name: "",
@@ -96,19 +101,20 @@ function AuthFields({
   value: ConnectAuth;
   onChange: (next: ConnectAuth) => void;
 }) {
+  const t = useT();
   return (
     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
       <label className="flex flex-col gap-1">
-        <span className="text-[11px] text-zinc-500">认证方式</span>
+        <span className="text-[11px] text-zinc-500">{t("servers.auth")}</span>
         <Select
           value={value.authMethod}
-          options={AUTH_OPTIONS}
+          options={authOptions(t)}
           onChange={(authMethod) => onChange({ ...value, authMethod })}
         />
       </label>
       {value.authMethod === "password" && (
         <label className="flex flex-col gap-1 sm:col-span-2">
-          <span className="text-[11px] text-zinc-500">密码（只留在内存，不写盘）</span>
+          <span className="text-[11px] text-zinc-500">{t("servers.password")}</span>
           <TextInput
             type="password"
             autoComplete="off"
@@ -120,7 +126,7 @@ function AuthFields({
       {value.authMethod === "key" && (
         <>
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-zinc-500">私钥路径</span>
+            <span className="text-[11px] text-zinc-500">{t("servers.keyPath")}</span>
             <TextInput
               className="font-mono"
               placeholder="~/.ssh/id_ed25519"
@@ -129,7 +135,7 @@ function AuthFields({
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-zinc-500">私钥口令（可留空）</span>
+            <span className="text-[11px] text-zinc-500">{t("servers.passphrase")}</span>
             <TextInput
               type="password"
               autoComplete="off"
@@ -150,6 +156,7 @@ export function ServersDialog({
   onClose: () => void;
   onSwitched: () => void;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["hub-state"],
@@ -273,43 +280,41 @@ export function ServersDialog({
   };
 
   return (
-    <Modal title="后端服务器" onClose={onClose} width="max-w-3xl">
+    <Modal title={t("servers.title")} onClose={onClose} width="max-w-3xl">
       <div className="space-y-4">
         <p className="text-xs text-zinc-500">
-          前端始终在本机运行，数据请求 <code className="text-zinc-400">/api</code>{" "}
-          会被转发到<b className="text-zinc-300">本标签的后端</b>。服务器列表全局共享；「使用」只切换当前标签。连接时现场输入密码或选择私钥（凭据只留内存，已连接的服务器之间切换不用再输）。先探测远端端口
-          health：同用户已有健康后端则只接隧道；端口空闲才 SFTP 部署并启动。连接过程可随时「中断」。断开隧道仅当没有任何标签仍指向该服务器。端口被其他程序或其他用户占用时请改「后端端口」。
+          {t("servers.intro1")} <code className="text-zinc-400">/api</code> {t("servers.intro2")}
         </p>
 
         <div className="overflow-hidden rounded border border-zinc-800">
           <div className="flex items-center gap-3 border-b border-zinc-800 px-3 py-2">
             <Dot className={state?.localActive ? "bg-emerald-500" : "bg-zinc-600"} />
             <div className="min-w-0 flex-1">
-              <div className="text-xs text-zinc-200">本机后端</div>
+              <div className="text-xs text-zinc-200">{t("servers.local")}</div>
               <div className="truncate font-mono text-[11px] text-zinc-500">127.0.0.1:8756</div>
             </div>
             {state?.localActive ? (
               <span className="flex items-center gap-1 rounded bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-400">
-                <Check size={11} /> 当前
+                <Check size={11} /> {t("common.current")}
               </span>
             ) : (
-              <Button onClick={() => setActive.mutate("local")} disabled={setActive.isPending} title="本标签改用本机后端">
-                使用
+              <Button onClick={() => setActive.mutate("local")} disabled={setActive.isPending} title={t("servers.useLocal")}>
+                {t("common.use")}
               </Button>
             )}
           </div>
 
           {isLoading && (
             <div className="flex items-center gap-2 p-3 text-xs text-zinc-500">
-              <Spinner /> 加载中
+              <Spinner /> {t("common.loading")}
             </div>
           )}
           {!isLoading && servers.length === 0 && (
-            <div className="p-3 text-xs text-zinc-600">还没有添加远程服务器。</div>
+            <div className="p-3 text-xs text-zinc-600">{t("servers.empty")}</div>
           )}
 
           {servers.map((server) => {
-            const meta = STATE_META[server.state];
+            const meta = stateMeta(t)[server.state];
             const isBusy = busyId === server.id;
             const connected = server.state === "active";
             const showAuth = authId === server.id && !connected;
@@ -324,12 +329,12 @@ export function ServersDialog({
                       <span className="truncate text-xs text-zinc-200">{server.name}</span>
                       {server.active && (
                         <span className="flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-400">
-                          <Check size={10} /> 当前
+                          <Check size={10} /> {t("common.current")}
                         </span>
                       )}
                       {connected && server.reused && (
                         <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] text-sky-400">
-                          复用
+                          {t("servers.reused")}
                         </span>
                       )}
                       <span className="text-[10px] text-zinc-500">{meta.label}</span>
@@ -343,8 +348,8 @@ export function ServersDialog({
                   <div className="flex shrink-0 items-center gap-1">
                     {isBusy && <Spinner className="mr-1" />}
                     {connected && !server.active && (
-                      <Button onClick={() => setActive.mutate(server.id)} title="本标签使用该后端（无需再认证）">
-                        使用
+                      <Button onClick={() => setActive.mutate(server.id)} title={t("servers.useRemote")}>
+                        {t("common.use")}
                       </Button>
                     )}
                     {server.state === "connecting" && (
@@ -352,9 +357,9 @@ export function ServersDialog({
                         variant="danger"
                         onClick={() => disconnect.mutate(server.id)}
                         disabled={disconnect.isPending}
-                        title="中断这次连接（不会停掉远端已在跑的后端）"
+                        title={t("servers.abortTitle")}
                       >
-                        中断
+                        {t("servers.abort")}
                       </Button>
                     )}
                     {connected ? (
@@ -362,21 +367,19 @@ export function ServersDialog({
                         <Button
                           onClick={() => restart.mutate(server.id)}
                           disabled={isBusy}
-                          title="停掉远端这份后端并用刚同步的代码重新启动"
+                          title={t("servers.restartTitle")}
                         >
-                          <RefreshCw size={13} /> 重启后端
+                          <RefreshCw size={13} /> {t("servers.restart")}
                         </Button>
                         <Button
                           variant="danger"
                           onClick={() => disconnect.mutate(server.id)}
                           disabled={isBusy}
                           title={
-                            server.startedByUs
-                              ? "本标签改回本机；若没有其他标签仍指向该服务器，则停止远端后端并断开隧道"
-                              : "本标签改回本机；若没有其他标签仍指向该服务器，则断开隧道（复用的远端后端不会停）"
+                            server.startedByUs ? t("servers.stopTitle") : t("servers.disconnectTitle")
                           }
                         >
-                          <Power size={13} /> {server.startedByUs ? "停止" : "断开"}
+                          <Power size={13} /> {server.startedByUs ? t("servers.stop") : t("servers.disconnect")}
                         </Button>
                       </>
                     ) : (
@@ -385,9 +388,9 @@ export function ServersDialog({
                           variant="solid"
                           onClick={() => openAuth(server)}
                           disabled={isBusy || server.state === "connecting"}
-                          title="认证并连接"
+                          title={t("servers.connectAuth")}
                         >
-                          <Plug size={13} /> {server.state === "error" ? "重试" : "连接"}
+                          <Plug size={13} /> {server.state === "error" ? t("common.retry") : t("servers.connect")}
                         </Button>
                       )
                     )}
@@ -395,7 +398,7 @@ export function ServersDialog({
                       variant="danger"
                       onClick={() => remove.mutate(server.id)}
                       disabled={connected || server.state === "connecting"}
-                      title="删除"
+                      title={t("common.delete")}
                     >
                       <Trash2 size={13} />
                     </Button>
@@ -404,7 +407,7 @@ export function ServersDialog({
 
                 {!connected && (
                   <div className="mt-1.5 flex items-center gap-2 pl-5">
-                    <span className="text-[11px] text-zinc-500">后端端口</span>
+                    <span className="text-[11px] text-zinc-500">{t("servers.backendPort")}</span>
                     <TextInput
                       type="text"
                       inputMode="numeric"
@@ -427,7 +430,7 @@ export function ServersDialog({
                     <AuthFields value={auth} onChange={setAuth} />
                     {auth.authMethod === "agent" && (
                       <div className="text-[11px] text-zinc-600">
-                        使用本机 ssh-agent 里已有的密钥，不用再输密码。
+                        {t("servers.agentHint")}
                       </div>
                     )}
                     <div className="flex justify-end gap-1">
@@ -437,7 +440,7 @@ export function ServersDialog({
                           if (server.state === "connecting") disconnect.mutate(server.id);
                         }}
                       >
-                        {server.state === "connecting" ? "中断" : "取消"}
+                        {server.state === "connecting" ? t("servers.abort") : t("common.cancel")}
                       </Button>
                       <Button
                         variant="solid"
@@ -449,7 +452,7 @@ export function ServersDialog({
                         }
                         onClick={() => connect.mutate({ id: server.id, creds: auth })}
                       >
-                        开始连接
+                        {t("servers.startConnect")}
                       </Button>
                     </div>
                   </div>
@@ -464,7 +467,7 @@ export function ServersDialog({
                 <ConnLog
                   lines={server.log}
                   open={server.state === "connecting" || server.state === "error"}
-                  label={server.state === "connecting" ? "正在连接…" : "查看日志"}
+                  label={server.state === "connecting" ? t("servers.connecting") : t("servers.viewLog")}
                 />
               </div>
             );
@@ -473,11 +476,11 @@ export function ServersDialog({
 
         <div className="rounded border border-zinc-800 p-3">
           <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-zinc-400 uppercase">
-            <Server size={12} /> 添加服务器
+            <Server size={12} /> {t("servers.add")}
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-zinc-500">显示名（可留空）</span>
+              <span className="text-[11px] text-zinc-500">{t("servers.displayName")}</span>
               <TextInput
                 value={form.name}
                 placeholder="GPU1"
@@ -485,7 +488,7 @@ export function ServersDialog({
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-zinc-500">用户名</span>
+              <span className="text-[11px] text-zinc-500">{t("servers.user")}</span>
               <TextInput
                 value={form.user}
                 placeholder="ubuntu"
@@ -493,15 +496,15 @@ export function ServersDialog({
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-zinc-500">主机</span>
+              <span className="text-[11px] text-zinc-500">{t("servers.host")}</span>
               <TextInput
                 value={form.host}
-                placeholder="10.0.0.5 或 host.example.com"
+                placeholder={t("servers.hostPlaceholder")}
                 onChange={(event) => setForm({ ...form, host: event.target.value })}
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-zinc-500">SSH 端口</span>
+              <span className="text-[11px] text-zinc-500">{t("servers.sshPort")}</span>
               <TextInput
                 type="text"
                 inputMode="numeric"
@@ -514,7 +517,7 @@ export function ServersDialog({
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-zinc-500">远端目录</span>
+              <span className="text-[11px] text-zinc-500">{t("servers.remoteDir")}</span>
               <TextInput
                 className="font-mono"
                 value={form.remoteDir}
@@ -522,7 +525,7 @@ export function ServersDialog({
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-zinc-500">后端端口</span>
+              <span className="text-[11px] text-zinc-500">{t("servers.backendPort")}</span>
               <TextInput
                 type="text"
                 inputMode="numeric"
@@ -535,16 +538,16 @@ export function ServersDialog({
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-zinc-500">默认认证</span>
+              <span className="text-[11px] text-zinc-500">{t("servers.defaultAuth")}</span>
               <Select
                 value={form.authMethod}
-                options={AUTH_OPTIONS}
+                options={authOptions(t)}
                 onChange={(authMethod) => setForm({ ...form, authMethod })}
               />
             </label>
             {form.authMethod === "key" && (
               <label className="flex flex-col gap-1 sm:col-span-2">
-                <span className="text-[11px] text-zinc-500">私钥路径（可在连接时再填）</span>
+                <span className="text-[11px] text-zinc-500">{t("servers.keyPathLater")}</span>
                 <TextInput
                   className="font-mono"
                   placeholder="~/.ssh/id_ed25519"
@@ -556,7 +559,7 @@ export function ServersDialog({
           </div>
           <div className="mt-2 flex justify-end">
             <Button variant="solid" disabled={!canSubmit || add.isPending} onClick={() => add.mutate()}>
-              添加
+              {t("common.add")}
             </Button>
           </div>
         </div>

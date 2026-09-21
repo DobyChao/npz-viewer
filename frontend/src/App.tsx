@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import type { Layout, LayoutChangedMeta, PanelSize } from "react-resizable-panels";
@@ -6,6 +6,7 @@ import { api } from "./lib/api";
 import { invalidateAfterFsRefresh } from "./lib/refresh";
 import { useHotkeys } from "./hooks/useHotkeys";
 import { useNpzNavigation } from "./hooks/useNpzNavigation";
+import { htmlLang } from "./i18n";
 import { useAppStore } from "./store/useAppStore";
 import { canEnableOp, useCompareStore } from "./store/useCompareStore";
 import { FolderTree } from "./components/FolderTree";
@@ -67,6 +68,11 @@ export default function App() {
   const queryClient = useQueryClient();
   const currentDir = useAppStore((state) => state.currentDir);
   const lightbox = useAppStore((state) => state.lightbox);
+  const locale = useAppStore((state) => state.locale);
+
+  useEffect(() => {
+    document.documentElement.lang = htmlLang(locale);
+  }, [locale]);
   const nav = useNpzNavigation();
 
   const panel = useCompareStore((state) => state.panel);

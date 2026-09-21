@@ -1,49 +1,60 @@
 # npz 浏览器
 
-浏览、渲染、对比 `.npz` 文件的本地工具。针对图像类实验产物设计：一个 npz 里通常有若干张
-linear RGB 图、gainmap、mask、特征图和一些小矩阵，需要快速看图、跨版本比对、读原始像素值。
+**中文** | [English](README.en.md)
 
-- 后端 Python + FastAPI，负责扫目录、解 npz、把数组渲染成 PNG/WebP
-- 前端 React + Vite + TailwindCSS，负责布局、缩略图、FastStone 式同步对比
-- 单文件夹 20 万个 npz 也能用：目录索引分三级缓存，列表服务端分页，缩略图懒加载并限流
+本地浏览、渲染、对比 `.npz` 的工具，面向图像实验产物：一个文件里通常有若干张 linear RGB、gainmap、mask、特征图和小矩阵，需要快速看图、跨版本比对、读原始像素。
 
-详细的需求与设计决策见 [`docs/SPEC.md`](docs/SPEC.md)。对比面板拖动收起/展开与按钮状态如何对齐，见 [`docs/resizable-panel-visibility.md`](docs/resizable-panel-visibility.md)。
+- 后端 Python + FastAPI：扫目录、解 npz、把数组渲染成 PNG/WebP
+- 前端 React + Vite + Tailwind：布局、缩略图、FastStone 式同步对比
+- 单文件夹 20 万个 npz 也能用：目录索引三级缓存、列表服务端分页、缩略图懒加载并限流
+- 界面 **中文 / English**，顶栏可切换；首次打开跟随浏览器语言
+
+需求与设计决策见 [`docs/SPEC.md`](docs/SPEC.md)。对比面板拖动收起/展开与按钮状态如何对齐，见 [`docs/resizable-panel-visibility.md`](docs/resizable-panel-visibility.md)。
+
+## 目录
+
+- [环境要求](#环境要求)
+- [快速开始](#快速开始)
+- [本机客户端](#本机客户端tauri)
+- [远程后端](#远程后端把后端部署到服务器)
+- [渲染规则](#渲染规则)
+- [快捷键与对比](#快捷键与对比)
+- [测试](#测试)
+- [大目录](#大目录)
+- [目录结构](#目录结构)
 
 ## 环境要求
 
 - Python 3.11+（开发验证于 3.14）
-- Node.js `^20.19.0 || >=22.12.0`（Vite 8 的要求，已写进 `frontend/package.json` 的 `engines`；
-  开发验证于 24）
-- 桌面窗口（`npm run tauri:dev` / `tauri:build`）：Rust 1.85+，以及系统 WebView
-  （Linux：`libwebkit2gtk-4.1-dev` `libgtk-3-dev`）
+- Node.js `^20.19.0 || >=22.12.0`（Vite 8 要求，已写进 `frontend/package.json` 的 `engines`；开发验证于 24）
+- 桌面窗口（`npm run tauri:dev` / `tauri:build`）：Rust 1.85+，以及系统 WebView（Linux：`libwebkit2gtk-4.1-dev` `libgtk-3-dev`）
 
-`typecheck` 脚本直接调用 `node node_modules/typescript/lib/tsc.js` 而不是 `tsc`，这是刻意的：
-typescript 7 的 `bin/tsc` 是个**没有扩展名**的 ESM 文件，只有较新的 Node 能把它当入口执行，稍旧的
-Node 会报 `ERR_UNKNOWN_FILE_EXTENSION`。改走带扩展名的 `lib/tsc.js`，在上面整个版本范围内都能用。
+`typecheck` 直接调用 `node node_modules/typescript/lib/tsc.js` 而不是 `tsc`：typescript 7 的 `bin/tsc` 是没有扩展名的 ESM，稍旧的 Node 会报 `ERR_UNKNOWN_FILE_EXTENSION`。走带扩展名的 `lib/tsc.js` 在整个版本范围内都能用。
 
 ## 快速开始
+
+浏览器开发（前端代理 `/api`，不涉及跨域）：
 
 ```bash
 # 1. 后端依赖
 python -m venv .venv
 .venv\Scripts\pip install -r requirements-dev.txt      # Linux/macOS: .venv/bin/pip
 
-# 2. 生成样例数据（顺便把它写进 roots.json）
+# 2. 生成样例数据（顺便写进 roots.json）
 .venv\Scripts\python scripts/make_sample_npz.py
 
 # 3. 启动后端（默认 127.0.0.1:8756）
 cd backend && ..\.venv\Scripts\python -m app.main
 
-# 4. 另开一个终端启动前端（默认 127.0.0.1:5273）
+# 4. 另开终端启动前端（默认 127.0.0.1:5273）
 cd frontend && npm install && npm run dev
 ```
 
-打开 http://127.0.0.1:5273 即可。前端 dev server 会把 `/api` 代理到后端，不涉及跨域。
+打开 http://127.0.0.1:5273 。
 
 ### 配置可访问的目录（roots）
 
-后端只允许访问 `roots.json` 里列出的目录及其子目录，路径穿越（`..`、符号链接指到外面）会被
-拒绝并返回 `PATH_OUTSIDE_ROOT`。
+后端只允许访问 `roots.json` 里列出的目录及其子目录。路径穿越（`..`、符号链接指到外面）会返回 `PATH_OUTSIDE_ROOT`。
 
 ```json
 {
@@ -54,61 +65,18 @@ cd frontend && npm install && npm run dev
 }
 ```
 
-这个文件可以在前端顶栏的「管理 root」里增删，也可以直接用编辑器改 —— 后端按 mtime 热加载，
-不用重启。Windows 和 Linux 都用正斜杠写绝对路径。
-
-### 本机客户端（Tauri）
-
-这个分支按**桌面客户端**迭代。浏览器不能 SSH；窗口是 Tauri（系统 WebView，不是 Electron 自带的 Chrome），SSH 仍是本机 Node `ssh2` hub。
-
-开发（热更新 + 同一套 hub）：
-
-```bash
-cd frontend && npm install
-npm run tauri:dev
-```
-
-会起 Vite `:5273`，再打开原生窗口（顶部原生标签栏，每个标签一个 WebView）。顶栏「后端服务器」只切换**当前标签**的后端。
-
-#### Windows 便携 zip（解压即用）
-
-在 64 位 Windows 上（需 Node、Rust、本机 WebView2）：
-
-```bash
-cd frontend && npm install
-npm run pack:windows
-```
-
-产物是 `dist-portable/npz-view-0.1.1-windows-x64.zip`。解压到普通文件夹，双击 `npz-view.exe`。zip 里已带 Node、embeddable Python 和前端 dist，**不需要**再装 Node / Python，也**不要**放到 Program Files。本机只需 Windows 自带的 WebView2。打不开时看同目录 `npz-view-hub.log`。
-
-源码直接打 exe（迭代用，仍要本机 Node / Python / 这份仓库）：
-
-```bash
-cd frontend && npm run build
-npm run tauri:build
-```
-
-Windows x64 交叉编译（Linux 上）仍可用 `npm run tauri:build:windows`；那个 NSIS `setup.exe` 会装到 Program Files，便携布局对不上，请用上面的 zip。
-
-发布版启动时会拉起 `scripts/npz-view.mjs`（便携版用自带 Python + 自带 hub；源码运行则用本机 Python + vite preview），并给 hub 一个**临时本机端口**（`NPZVIEW_UI_PORT`，不固定占用 5273）。窗口用原生多 WebView 标签打开该地址（`/?session=<id>`）。关掉最后一个标签或退出窗口会停掉这层壳。Windows 上 Node 日志写在客户端目录的 `npz-view-hub.log`。
-
-只要页面、不要窗口时仍可用（未指定端口时同样自选空闲端口）：
-
-```bash
-node scripts/npz-view.mjs
-```
+可在顶栏「管理 root」里增删，也可直接改文件——后端按 mtime 热加载。Windows 和 Linux 都用正斜杠写绝对路径。
 
 ### 服务器单进程（无本机 SSH 切换）
 
-数据已经在这台机器上、别人用浏览器直接打开时，仍然可以只跑 Python：
+数据已经在这台机器上、别人用浏览器直接打开时，可以只跑 Python：
 
 ```bash
 cd frontend && npm run build
 cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/dist
 ```
 
-此时访问 http://127.0.0.1:8756 一个地址。没有 Node，也就没有 UI 里「连另一台机器」的能力——
-那是上面「本机客户端」的事。
+访问 http://127.0.0.1:8756 一个地址。没有 Node，也就没有 UI 里「连另一台机器」的能力。
 
 ### 常用启动参数
 
@@ -123,144 +91,151 @@ cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/di
 | `--allow-pickle` | 关闭 | 允许读取含 object 数组的 npz，**会执行文件里的 pickle**，仅用于可信数据 |
 | `--static-dir` | 无 | 指定后托管前端构建产物 |
 
-所有参数也可以用 `NPZVIEW_` 前缀的环境变量设置，例如 `NPZVIEW_PORT=9000`。
+也可用 `NPZVIEW_` 前缀的环境变量，例如 `NPZVIEW_PORT=9000`。
+
+## 本机客户端（Tauri）
+
+浏览器不能 SSH。桌面窗口是 Tauri（系统 WebView），SSH 仍是本机 Node `ssh2` hub。
+
+```bash
+cd frontend && npm install
+npm run tauri:dev
+```
+
+会起 Vite `:5273`，再打开原生窗口（顶部原生标签栏，每个标签一个 WebView）。顶栏「后端服务器」只切换**当前标签**的后端。
+
+### Windows 便携 zip（解压即用）
+
+64 位 Windows（需 Node、Rust、本机 WebView2）：
+
+```bash
+cd frontend && npm install
+npm run pack:windows
+```
+
+产物是 `dist-portable/npz-view-0.1.1-windows-x64.zip`。解压到普通文件夹，双击 `npz-view.exe`。zip 里已带 Node、embeddable Python 和前端 dist，**不需要**再装 Node / Python，也**不要**放到 Program Files。打不开时看同目录 `npz-view-hub.log`。
+
+源码直接打 exe（迭代用，仍要本机 Node / Python / 这份仓库）：
+
+```bash
+cd frontend && npm run build
+npm run tauri:build
+```
+
+Windows x64 交叉编译（Linux 上）可用 `npm run tauri:build:windows`；那个 NSIS `setup.exe` 会装到 Program Files，便携布局对不上，请用上面的 zip。
+
+发布版启动时会拉起 `scripts/npz-view.mjs`（便携版用自带 Python + hub；源码运行则用本机 Python + vite preview），并给 hub 一个**临时本机端口**（`NPZVIEW_UI_PORT`，不固定占用 5273）。关掉最后一个标签或退出窗口会停掉这层壳。
+
+只要页面、不要窗口时：
+
+```bash
+node scripts/npz-view.mjs
+```
+
+未指定端口时同样自选空闲端口。
 
 ## 远程后端（把后端部署到服务器）
 
-数据在服务器上时，可以让后端跑在数据旁边、前端仍留在本机。顶栏点「后端服务器」→「添加服务器」，
-填 SSH 用户名 / 主机 / SSH 端口、远端目录和后端端口，然后点「连接」，在表单里选认证方式。远端目录默认是 `~/.npz-viewer-backend`：
+数据在服务器上时，后端跑在数据旁边、前端仍留在本机。顶栏「后端服务器」→「添加服务器」，填 SSH 用户名 / 主机 / SSH 端口、远端目录和后端端口，然后连接。远端目录默认 `~/.npz-viewer-backend`。
 
-- **密码**：本次连接现场输入，只留在本机 Node 进程内存里，连上或失败后即弃，不写 `servers.json`
-- **私钥文件**：填本机密钥路径，可选私钥口令；路径可以记住，密钥内容和口令不落盘
+认证：
+
+- **密码**：本次连接现场输入，只留内存，不写 `servers.json`
+- **私钥文件**：填本机密钥路径，可选口令；路径可以记住，密钥内容和口令不落盘
 - **ssh-agent**：沿用本机已有的免密环境
 
-连接时会：SSH 登录 → 在 SSH 会话里探测远端 `127.0.0.1:<后端端口>` 的占用和 `/api/health` →
-**同用户已有健康后端则只建隧道、跳过部署** → 端口空闲才 SFTP 增量同步 **`backend/app` 和 `requirements.txt`** 并启动（`.venv` 里依赖已能导入则跳过 pip）。连接过程可在界面里「中断」。隧道是本机 `net.Server` + `forwardOut`（等效 `ssh -L`）。`/api` 随后转到所选后端，
-**原始 npz 不过网，只有渲染好的图和 JSON 回传**。已连接的服务器之间点「使用」切换**当前标签**，不用再输凭据。桌面客户端可开多个标签，各自指向本机或已连接的远端；断开隧道仅当没有任何标签仍指向该服务器。
+连接时会：SSH 登录 → 探测远端 `127.0.0.1:<后端端口>` 占用和 `/api/health` → **同用户已有健康后端则只建隧道、跳过部署** → 端口空闲才 SFTP 增量同步 `backend/app` 和 `requirements.txt` 并启动（`.venv` 里依赖已能导入则跳过 pip）。连接过程可在界面里中断。
 
-连本机 WSL（`127.0.0.1:22`）时，占用探测走远端 python，不依赖 Windows 侧 SSH 端口转发。若 Defender 拦过 Node Runtime，请在防火墙里允许它，否则隧道（`direct-tcpip`）会失败，看起来像「怎么改端口都被占用」。
+**原始 npz 不过网**，只有渲染好的图和 JSON 回传。已连接的服务器之间点「使用」切换当前标签。断开隧道仅当没有任何标签仍指向该服务器。
 
-远端端口冲突按占用者区分（端口是整机一份，改的是「后端端口」不是 SSH 端口）：
+远端端口冲突按占用者区分：
 
-1. 空闲 → 部署并启动（tmux session / pidfile 带端口，`npzview-backend-<port>`）
-2. 本 SSH 用户已有健康的本应用 → **复用**，只接隧道；「停止」只关隧道。需要新代码时点「重启后端」
-3. 其他程序占着，或其他用户的 npz-viewer 占着 → 报错，请改后端端口。不会 kill 不认识的进程
+1. 空闲 → 部署并启动
+2. 本 SSH 用户已有健康的本应用 → **复用**，只接隧道
+3. 其他程序或其他用户占用 → 报错，请改后端端口；不会 kill 不认识的进程
 
-要求：远端目录里要有 `.venv`（首次连接会尝试用系统 `python3 -m venv` 创建）。若系统 Python 缺 ensurepip，界面会提示你 SSH 上去用任意带 pip 的 Python 自行创建（conda / uv / 自己编译的均可），不必装 `python3-venv`。后端需要 Python 3.13+ 才能用视频导出。每台服务器有各自的 `roots.json` 和缓存。
-服务器列表存在本机的 `servers.json`（已 gitignore），只含 host/user/端口/目录/认证方式/可选密钥路径。
+要求：远端目录里要有 `.venv`（首次连接会尝试用系统 `python3 -m venv` 创建）。后端需要 Python 3.13+ 才能用视频导出。服务器列表存在本机 `servers.json`（已 gitignore）。
 
-实现在本机 Node 里（`frontend/hub/`，`ssh2`）：`/__hub/*` 是管理接口，`/api/*` 按请求上的 session（头 `X-Npzview-Session` 或 query `npzview_session`）反代到该标签的后端。
-桌面窗口是 Tauri（`npm run tauri:dev`），原生标签栏 + 多 WebView。不要窗口时用 `node scripts/npz-view.mjs`（浏览器里仍是单页）。纯 Python
-`--static-dir` 单进程没有这层 Node，不能从 UI 发起 SSH。
+纯 Python `--static-dir` 单进程没有这层 Node，不能从 UI 发起 SSH。
 
 ## 渲染规则
 
-数据类型的判定和像素处理完全在后端完成，前端只负责显示返回的 8bit 图。
+数据类型判定和像素处理在后端完成，前端只显示返回的 8bit 图。
 
 | 数组形态 | 判定 | 渲染方式 |
 | --- | --- | --- |
-| `[C,H,W]` / `[H,W,C]`，C=3 | `rgb` | 视作 linear RGB，clip 到 0–1，gamma 2.2 编码 |
-| C=4 | `rgba` | 同上，alpha 通道**不做 gamma**，前端用棋盘格衬底 |
-| C=1 或二维 | `gray` | 保持线性，不做 gamma；可选 min/max 归一化和伪彩色 |
+| `[C,H,W]` / `[H,W,C]`，C=3 | `rgb` | linear RGB，clip 0–1，gamma 2.2 |
+| C=4 | `rgba` | 同上，alpha **不做 gamma**，前端棋盘格衬底 |
+| C=1 或二维 | `gray` | 保持线性；可选 min/max 归一化和伪彩色 |
 | key 名含 `gainmap` | `gainmap` | clip 到 0–2 再除以 2，然后 gamma 2.2 |
-| C 为其他值 | `stack` | 按通道逐张显示灰度图 |
-| 四维 `[B,...]` | 带 batch | 卡片上可以切换 batch 序号 |
+| C 为其他值 | `stack` | 按通道逐张灰度 |
+| 四维 `[B,...]` | 带 batch | 卡片上切换 batch 序号 |
 | 一维、或不超过 9×9 的二维 | `table` | 直接列出数值 |
 
-**色域**：顶栏可以在 BT.2020 和 P3 之间切换。选 P3 时先做一次 BT.2020 → Display P3 的矩阵变换，
-再 clip、再 gamma 编码；矩阵由两个色域的原色/白点坐标现算（见 `backend/app/color.py`），不是硬编码常数。
+顶栏可在 BT.2020 和 P3 之间切换。选 P3 时先做 BT.2020 → Display P3 矩阵变换，再 clip、再 gamma。输出 PNG/WebP **不嵌入 ICC**，浏览器按 sRGB 解释，广色域屏上是近似效果。完整规则见 SPEC 第 4 节。
 
-输出的 PNG/WebP **不嵌入 ICC profile**，浏览器一律按 sRGB 解释。所以 P3 模式是"数值变换后按
-sRGB 显示"，在广色域屏上是近似效果，用于对比两种色域下的数值差异，不适合当色彩校样。这是一个
-刻意的简化，取舍记录在 SPEC 第 2 节。
+形如 `[3,4,3]` 两端都像通道轴时，默认按 HWC，卡片上会出现 CHW/HWC 切换。
 
-**通道轴歧义**：形如 `[3,4,3]` 这种两端都像通道轴的数组，默认按 HWC 解释，卡片上会出现
-CHW/HWC 切换按钮，并标注歧义。
-
-## 快捷键
+## 快捷键与对比
 
 | 按键 | 作用 |
 | --- | --- |
-| `←` / `→` | 上一个 / 下一个 npz（同文件夹内，自然序） |
-| `↑` / `↓` | 跳到相邻兄弟文件夹里**同序号**的 npz，用于跨版本比对；会自动跳过没有 npz 的文件夹 |
-| `空格` | A/B 翻转，在已选的对比图之间切换 |
+| `←` / `→` | 上一个 / 下一个 npz（同文件夹，自然序） |
+| `↑` / `↓` | 跳到相邻兄弟文件夹里**同序号**的 npz |
+| `空格` | A/B 翻转（不是播放） |
 | `P` | 文件内对比已选起止帧时，进入序列并播放/暂停 |
-| `1`–`4` | 直接切到第 N 张对比图 |
-| 按住 `X` | 覆盖模式下临时移开覆盖层，松开恢复，用于闪烁比对 |
+| `1`–`4` | 切到第 N 张对比图 |
+| 按住 `X` | 覆盖模式下临时移开覆盖层 |
 | `F` | 对比面板占满右侧 / 还原分栏 |
-| `Ctrl+0` / `Ctrl+1` | 对比面板适应窗口 / 100% |
+| `Ctrl+0` / `Ctrl+1` | 适应窗口 / 100% |
 | `R` | 刷新当前目录（丢弃该目录的索引缓存） |
 | `Esc` | 关闭对比面板；灯箱打开时先关灯箱 |
+| `G` | 开关临时算子格 |
 
-对比视图里滚轮缩放（以光标为锚点）、拖拽平移，**所有分块共享同一个视口**，缩放超过 150% 后
-切成最近邻采样以便看清像素边界。分块数量决定默认网格（2 张并排、3 张三列、4 张 2×2），也可以
-在工具栏里手动指定 1×1 / 并排 / 上下 / 三列 / 三行 / 2×2。
+对比视图滚轮缩放（以光标为锚点）、拖拽平移，**所有分块共享视口**。超过 150% 切最近邻采样。
 
-找细微差异有两种模式，同时提供：
+找细微差异有两种互斥模式：
 
-- **A/B 翻转**：整个面板只显示一张图，空格轮流切换。适合两张图差别较大、想看整体的时候。
-- **覆盖**：对应 FastStone 的 Overlay (Right on Left)，把「覆盖源」那一格的图直接叠到第 1 格
-  上，布局不变、覆盖源那一格仍显示原图作参照。按住 `X` 临时移开覆盖层，一放一按之间图上任何
-  位移或数值变化都会跳出来。超过两张图时，点其他分块右上角的图层按钮可以改覆盖源。
+- **A/B 翻转**：整面板只显示一张，空格轮流切换
+- **覆盖**：FastStone Overlay (Right on Left)。默认按住 X 覆盖；点「覆盖」锁定。覆盖源可以是任意非基准格（含算子格），目的地始终是第 1 格
 
-两个模式是互斥的，开一个会自动关掉另一个。因为所有分块共享视口，叠上去的两层天然像素对齐，
-不需要额外配准。
+**等高**：尺寸不一致时（gainmap 常常半分辨率）把各图缩放到与第 1 格相同的显示高度，可与覆盖叠用。
 
-**等高**：图的尺寸不一样时（gainmap 常常是半分辨率），共享视口会让小图显示得也小，没法比。
-打开「等高」后每张图各自等比缩放到与第 1 格相同的显示高度，第 1 格就是基准，状态栏会显示基准
-高度。这个开关和覆盖可以叠着用 —— 半分辨率的 gainmap 叠到全分辨率的图上会先拉到等高再叠，
-边界正好对上。检测到分块尺寸不一致时，「等高」按钮上会出现一个琥珀色小点提示你可以开。
-
-缩放上跟随 FastStone 的模型：处于「适应窗口」状态时，改变面板大小、增删分块、切换布局都会重新
-适应；一旦你手动滚轮缩放过，就不再自动改动你的视口，翻页也保持不变。
-
-**序列播放与导出**（只在「文件内」对比）：对比默认跟着左边选中的 npz。点胶片按钮进入序列模式后，
-格子改跟 playhead；点列表里另一个文件会退出，对比回到该文件。选出起止帧后按 `P` 连续播，
-勾选的 key 一起换文件，左边文件列表不动。导出把同一套宫格合成一条无音轨的 H.264
-MP4，默认写到该序列所在目录（可改 `save_dir`），不经过浏览器另存为对话框；也可在完成后用链接打开。
-可选完整原图或当前视口裁剪。跨文件对比没有这条能力。
+**序列播放与导出**只在「文件内」对比：点胶片按钮进入序列后格子跟 playhead；点列表里另一个文件会退出。`P` 连续播，不跳帧（跟不上就降有效 fps），不循环。导出把当前宫格合成无音轨 H.264 MP4，写到服务器路径（可改 `save_dir`），不经过浏览器另存为。跨文件对比没有这条能力。
 
 ## 测试
 
 ```bash
-# 后端：渲染规则、分类逻辑、目录索引、API 契约
 .venv\Scripts\python -m pytest
-
-# 前端：类型检查
 cd frontend && npm run typecheck
-
-# 前端端到端：同步缩放/平移、缩放保持、像素读数、灯箱、键盘导航、无 console 报错
 cd frontend && npm run e2e
 ```
 
-端到端用例需要后端在 8756 上跑着；Playwright 会自己拉起前端 dev server（已在跑就复用）。
-
-同步缩放/平移只能靠真实浏览器输入验证 —— 它依赖 non-passive 的原生 wheel 监听和 pointer
-capture，用 JS 合成事件测不出来，所以这部分放在 Playwright 而不是单元测试里。
+端到端需要后端在 8756 上跑着；Playwright 会自己拉起前端 dev server（已在跑就复用）。同步缩放/平移依赖 non-passive 原生 wheel 和 pointer capture，只能靠真实浏览器输入验证。
 
 ## 大目录
 
-单个文件夹 20 万个 npz 是设计目标，做法是：
+单文件夹 20 万个 npz 是设计目标：
 
-- `os.scandir` 一次拿到名字和 stat，避免每个文件再 stat 一遍
-- 目录快照三级缓存：进程内 LRU → 磁盘上的列式 JSON → 重新扫描；用目录 mtime 判断是否失效
-- 快照按自然序（`img_2` 在 `img_10` 前）存一份，其他排序方式按需派生并记忆化
-- 列表服务端分页，前端再用虚拟滚动只渲染可见行
-- 缩略图 IntersectionObserver 懒加载，全局最多 4 个并发请求，滚走的请求直接 abort
-- 渲染结果按（文件 mtime+size+全部渲染参数）哈希后缓存到磁盘，带 ETag，重复访问走 304
+- `os.scandir` 一次拿到名字和 stat
+- 目录快照三级缓存：进程内 LRU → 磁盘列式 JSON → 重新扫描；用目录 mtime 判断是否失效
+- 列表服务端分页，前端虚拟滚动
+- 缩略图 IntersectionObserver 懒加载，全局最多 4 个并发
+- 渲染结果按（mtime+size+全部渲染参数）哈希缓存，带 ETag
 
-压测数据可以用 `python scripts/make_sample_npz.py --stress 200000 --stress-only` 生成。
+压测：`python scripts/make_sample_npz.py --stress 200000 --stress-only`。
 
 ## 目录结构
 
 ```
 backend/app/
   api/          FastAPI 路由：roots / fs / npz / nav / video
-  services/     dirindex 目录索引、npzio 读取与分类、render 渲染管线、imgcache 磁盘缓存、video_export 宫格编码
+  services/     dirindex、npzio、render、imgcache、video_export
   color.py      色域矩阵推导与 gamma 编码
   paths.py      路径归一化与 root 白名单校验
 frontend/src/
   components/   TopBar、FolderTree、NpzList、NpzInfo、gallery/、compare/
+  i18n/         中英文字典与 t()
   hooks/        usePanZoom、useImageResource、useHotkeys、useNpzNavigation、useSequencePlayback
   store/        zustand：应用状态与对比状态
   lib/          API 客户端、类型、格式化

@@ -4,19 +4,17 @@ import { ChevronRight, HardDrive, Server, Settings, SlidersHorizontal } from "lu
 import { api } from "../lib/api";
 import { hub } from "../lib/hub";
 import { breadcrumbs } from "../lib/format";
+import { useT } from "../i18n";
 import { useAppStore } from "../store/useAppStore";
-import type { Gamut, RootInfo } from "../lib/types";
+import type { RootInfo } from "../lib/types";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 import { RootManagerDialog } from "./RootManagerDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { ServersDialog } from "./servers/ServersDialog";
 import { Button, IconButton, Segmented, Select } from "./ui";
 
-const GAMUT_OPTIONS: { value: Gamut; label: string; title: string }[] = [
-  { value: "bt2020", label: "BT.2020", title: "不做色域变换，直接 gamma 编码" },
-  { value: "p3", label: "P3", title: "先做 BT.2020 → Display P3 矩阵变换，再 clip、再 gamma 编码" },
-];
-
 export function TopBar() {
+  const t = useT();
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ["roots"], queryFn: api.roots });
   const { data: hubState } = useQuery({ queryKey: ["hub-state"], queryFn: hub.state });
@@ -31,7 +29,7 @@ export function TopBar() {
   const [showServers, setShowServers] = useState(false);
 
   const activeServer = hubState?.servers.find((server) => server.active);
-  const backendLabel = hubState?.localActive === false && activeServer ? activeServer.name : "本机";
+  const backendLabel = hubState?.localActive === false && activeServer ? activeServer.name : t("app.local");
   const backendRemote = hubState?.localActive === false;
 
   // Switching the backend invalidates every path: drop cached data (but keep the
@@ -66,17 +64,17 @@ export function TopBar() {
     <header className="flex h-11 shrink-0 items-center gap-3 border-b border-zinc-800 bg-zinc-900 px-3">
       <div className="flex items-center gap-1.5">
         <HardDrive size={15} className="text-cyan-500" />
-        <span className="text-sm font-semibold tracking-tight text-zinc-100">npz 浏览器</span>
+        <span className="text-sm font-semibold tracking-tight text-zinc-100">{t("app.name")}</span>
       </div>
 
       <div className="flex items-center gap-1">
         <Select
-          title="选择 root"
+          title={t("topBar.selectRoot")}
           value={activeRoot?.id ?? ""}
           options={
             roots.length
               ? roots.map((root) => ({ value: root.id, label: root.name }))
-              : [{ value: "", label: "未配置 root" }]
+              : [{ value: "", label: t("topBar.noRoot") }]
           }
           onChange={(value) => {
             const next = roots.find((root) => root.id === value);
@@ -84,7 +82,7 @@ export function TopBar() {
           }}
           className="max-w-44"
         />
-        <IconButton title="管理 root" onClick={() => setShowRoots(true)}>
+        <IconButton title={t("topBar.manageRoot")} onClick={() => setShowRoots(true)}>
           <SlidersHorizontal size={14} />
         </IconButton>
       </div>
@@ -111,7 +109,7 @@ export function TopBar() {
       <div className="flex shrink-0 items-center gap-2">
         <button
           type="button"
-          title="后端服务器"
+          title={t("topBar.servers")}
           onClick={() => setShowServers(true)}
           className="inline-flex items-center gap-1.5 rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-800"
         >
@@ -124,16 +122,24 @@ export function TopBar() {
           <Server size={13} className={backendRemote ? "text-emerald-400" : "text-zinc-400"} />
           <span className="max-w-28 truncate">{backendLabel}</span>
         </button>
-        <span className="text-[11px] text-zinc-500">显示色域</span>
-        <Segmented value={gamut} options={GAMUT_OPTIONS} onChange={setGamut} />
-        <IconButton title="设置" onClick={() => setShowSettings(true)}>
+        <span className="text-[11px] text-zinc-500">{t("topBar.gamut")}</span>
+        <Segmented
+          value={gamut}
+          options={[
+            { value: "bt2020", label: "BT.2020", title: t("topBar.gamutBt2020") },
+            { value: "p3", label: "P3", title: t("topBar.gamutP3") },
+          ]}
+          onChange={setGamut}
+        />
+        <LanguageSwitcher compact />
+        <IconButton title={t("topBar.settings")} onClick={() => setShowSettings(true)}>
           <Settings size={14} />
         </IconButton>
       </div>
 
       {roots.length === 0 && (
         <Button variant="solid" onClick={() => setShowRoots(true)}>
-          添加 root
+          {t("topBar.addRoot")}
         </Button>
       )}
 

@@ -26,7 +26,8 @@ import { useAppStore } from "../../store/useAppStore";
 import { canEnableOp, clampOperand, useCompareStore } from "../../store/useCompareStore";
 import type { CompareLayout, VideoExportKey } from "../../lib/types";
 import { DEFAULT_VIEW_OPTIONS } from "../../lib/types";
-import { BINARY_OPS, formatOpExpr, formatOpKeys, operandOptionLabel, opById } from "../../lib/ops";
+import { BINARY_OPS, formatOpExpr, formatOpKeys, operandOptionLabel } from "../../lib/ops";
+import { opLabel, useT } from "../../i18n";
 import { Button, EmptyState, IconButton, SectionHeader, Select } from "../ui";
 import { CompareTile } from "./CompareTile";
 import type { TileSpec } from "./CompareTile";
@@ -68,6 +69,7 @@ function gridClassFor(layout: Exclude<CompareLayout, "auto">): string {
 export function ComparePanel() {
   const { path, meta, version } = useCurrentNpz();
   const nav = useNpzNavigation();
+  const t = useT();
 
   const mode = useCompareStore((state) => state.mode);
   const items = useCompareStore((state) => state.items);
@@ -385,31 +387,31 @@ export function ComparePanel() {
 
   return (
     <div className="flex h-full flex-col bg-zinc-950">
-      <SectionHeader title="对比">
+      <SectionHeader title={t("compare.section")}>
         <div className="flex items-center gap-1">
           <IconButton
-            title="上一个 npz（←）"
+            title={t("compare.prevFile")}
             disabled={!nav.enabled || nav.busy}
             onClick={() => void nav.go("file", "prev")}
           >
             <ChevronLeft size={14} />
           </IconButton>
           <IconButton
-            title="下一个 npz（→）"
+            title={t("compare.nextFile")}
             disabled={!nav.enabled || nav.busy}
             onClick={() => void nav.go("file", "next")}
           >
             <ChevronRight size={14} />
           </IconButton>
           <IconButton
-            title="上一个兄弟文件夹的同序号 npz（↑）"
+            title={t("compare.prevFolder")}
             disabled={!nav.enabled || nav.busy}
             onClick={() => void nav.go("folder", "prev")}
           >
             <ChevronUp size={14} />
           </IconButton>
           <IconButton
-            title="下一个兄弟文件夹的同序号 npz（↓）"
+            title={t("compare.nextFolder")}
             disabled={!nav.enabled || nav.busy}
             onClick={() => void nav.go("folder", "next")}
           >
@@ -424,30 +426,30 @@ export function ComparePanel() {
           >
             {formatPercent(viewport.scale)}
           </span>
-          <IconButton title="适应窗口（Ctrl+0）" onClick={fit}>
+          <IconButton title={t("compare.fit")} onClick={fit}>
             <Scan size={14} />
           </IconButton>
-          <IconButton title="100%（Ctrl+1）" onClick={actualSize}>
+          <IconButton title={t("compare.actual")} onClick={actualSize}>
             <Ratio size={14} />
           </IconButton>
 
           <Select
-            title="网格布局"
+            title={t("compare.layout")}
             value={layout}
             options={[
-              { value: "auto", label: "自动" },
+              { value: "auto", label: t("common.auto") },
               { value: "1x1", label: "1×1" },
-              { value: "1x2", label: "并排" },
-              { value: "2x1", label: "上下" },
-              { value: "1x3", label: "三列" },
-              { value: "3x1", label: "三行" },
+              { value: "1x2", label: t("compare.layoutRow") },
+              { value: "2x1", label: t("compare.layoutCol") },
+              { value: "1x3", label: t("compare.layout3col") },
+              { value: "3x1", label: t("compare.layout3row") },
               { value: "2x2", label: "2×2" },
             ]}
             onChange={(value) => setLayout(value as CompareLayout)}
           />
 
           <Button
-            title="A/B 翻转：只显示一张，按空格在已选图之间切换"
+            title={t("compare.abTitle")}
             active={toggleIndex !== null}
             disabled={tiles.length < 2}
             onClick={() => (toggleIndex === null ? setToggleIndex(0) : setToggleIndex(null))}
@@ -456,51 +458,47 @@ export function ComparePanel() {
           </Button>
 
           <Button
-            title={
-              overlayEnabled
-                ? "覆盖已锁定：按住 X 临时移开。再点一次改回按住 X 才覆盖"
-                : "按住 X 把覆盖源叠到第 1 格；点击锁定覆盖"
-            }
+            title={overlayEnabled ? t("compare.overlayLocked") : t("compare.overlayHoldHint")}
             data-testid="overlay-toggle"
             data-locked={overlayEnabled ? "true" : "false"}
             active={overlayEnabled && overlayAvailable}
             disabled={tiles.length < 2}
             onClick={() => setOverlayEnabled(!overlayEnabled)}
           >
-            <Layers size={13} /> 覆盖
+            <Layers size={13} /> {t("compare.overlay")}
           </Button>
 
           <Button
             title={
               tiles.length >= 4
-                ? "已有 4 张源图，无法再加算子格"
+                ? t("compare.opFull")
                 : tiles.length < 2
-                  ? "至少两张图才能套算子"
+                  ? t("compare.opNeedTwo")
                   : opEnabled
-                    ? `关掉临时算子格（G）· 当前 ${formatOpExpr(opId, leftIndex, rightIndex)}`
-                    : "对两张源图套算子，临时生成一格（G）"
+                    ? t("compare.opOff", { expr: formatOpExpr(opId, leftIndex, rightIndex) })
+                    : t("compare.opOn")
             }
             data-testid="op-toggle"
             active={opEnabled && opAllowed}
             disabled={!opAllowed}
             onClick={() => toggleOp()}
           >
-            <Sigma size={13} /> 算子
+            <Sigma size={13} /> {t("compare.op")}
           </Button>
           {opEnabled && opAllowed && (
             <>
               <Select
-                title="算子"
+                title={t("compare.op")}
                 data-testid="op-kind"
                 value={opId}
                 options={BINARY_OPS.map((item) => ({
                   value: item.id,
-                  label: `${item.symbol} ${item.label}`,
+                  label: `${item.symbol} ${opLabel(item.id, t)}`,
                 }))}
                 onChange={setOpId}
               />
               <Select
-                title="左操作数"
+                title={t("compare.opLeft")}
                 data-testid="op-left"
                 value={String(leftIndex)}
                 options={tiles.map((tile, index) => ({
@@ -510,7 +508,7 @@ export function ComparePanel() {
                 onChange={(value) => setOpLeft(Number(value))}
               />
               <Select
-                title="右操作数"
+                title={t("compare.opRight")}
                 data-testid="op-right"
                 value={String(rightIndex)}
                 options={tiles.map((tile, index) => ({
@@ -520,7 +518,7 @@ export function ComparePanel() {
                 onChange={(value) => setOpRight(Number(value))}
               />
               <IconButton
-                title="互换左右操作数"
+                title={t("compare.opSwap")}
                 data-testid="op-swap"
                 onClick={() => swapOpOperands()}
               >
@@ -530,26 +528,26 @@ export function ComparePanel() {
           )}
 
           <Button
-            title="等高：把各图等比缩放到与第 1 格相同的显示高度，尺寸不同时才有意义"
+            title={t("compare.equalHeightTitle")}
             data-testid="equal-height-toggle"
             active={equalHeight}
             disabled={tiles.length < 2}
             onClick={() => setEqualHeight(!equalHeight)}
           >
-            <ArrowUpDown size={13} /> 等高
+            <ArrowUpDown size={13} /> {t("compare.equalHeight")}
             {mixedSizes && !equalHeight && <span className="text-amber-400">·</span>}
           </Button>
 
           <span className="mx-1 h-4 w-px bg-zinc-800" />
 
           <IconButton
-            title={panel === "full" ? "还原分栏（F）" : "占满右侧（F）"}
+            title={panel === "full" ? t("compare.restoreSplit") : t("compare.fillRight")}
             active={panel === "full"}
             onClick={() => setPanel(panel === "full" ? "split" : "full")}
           >
             {panel === "full" ? <Minimize2 size={14} /> : <Maximize size={14} />}
           </IconButton>
-          <IconButton title="关闭对比面板（Esc）" onClick={() => setPanel("hidden")}>
+          <IconButton title={t("compare.closePanel")} onClick={() => setPanel("hidden")}>
             <X size={14} />
           </IconButton>
         </div>
@@ -563,9 +561,7 @@ export function ComparePanel() {
 
       {tiles.length === 0 ? (
         <EmptyState>
-          {mode === "cross"
-            ? "还没有加入对比的图片：在 gallery 卡片上点「对比」。"
-            : "还没有勾选 key：在上方的对比条里勾选要比较的 key。"}
+          {mode === "cross" ? t("compare.emptyCross") : t("compare.emptyInside")}
         </EmptyState>
       ) : (
         <div
@@ -691,28 +687,28 @@ export function ComparePanel() {
             className="text-cyan-400"
             onClick={() => advanceToggle(displayTiles.length)}
           >
-            A/B {toggleIndex + 1} / {displayTiles.length} · 空格切换
+            {t("compare.abStatus", { current: toggleIndex + 1, total: displayTiles.length })}
           </button>
         )}
         {overlaySourceIndex !== null && (
           <span data-testid="overlay-status" className="text-amber-400">
             {overlayEnabled
               ? overlayVisible
-                ? `覆盖 ${overlaySourceIndex + 1} → 1 · 按住 X 移开覆盖层`
-                : "已移开，松开 X 恢复"
+                ? t("compare.overlayPeek", { n: overlaySourceIndex + 1 })
+                : t("compare.overlayHidden")
               : overlayVisible
-                ? `覆盖 ${overlaySourceIndex + 1} → 1 · 松开 X 移开`
-                : `按住 X 覆盖 ${overlaySourceIndex + 1} → 1`}
+                ? t("compare.overlayHoldPeek", { n: overlaySourceIndex + 1 })
+                : t("compare.overlayHoldOn", { n: overlaySourceIndex + 1 })}
           </span>
         )}
         {opEnabled && opAllowed && (
           <span data-testid="op-status" className="text-amber-400">
-            {opById(opId).label} {formatOpExpr(opId, leftIndex, rightIndex)}
+            {opLabel(opId, t)} {formatOpExpr(opId, leftIndex, rightIndex)}
           </span>
         )}
         {equalHeight && referenceSize && (
           <span data-testid="equal-height-status" className="text-cyan-400">
-            等高 · 基准 {referenceSize.height}px
+            {t("compare.equalHeightStatus", { h: referenceSize.height })}
           </span>
         )}
         {readout ? (
@@ -726,7 +722,8 @@ export function ComparePanel() {
           </span>
         ) : (
           <span className="text-zinc-700">
-            滚轮缩放 · 拖拽平移 · 所有面板同步{showPixelReadout ? " · 悬停读取原始像素值" : ""}
+            {t("compare.hint")}
+            {showPixelReadout ? t("compare.hintPixel") : ""}
           </span>
         )}
       </div>

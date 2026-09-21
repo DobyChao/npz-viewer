@@ -3,13 +3,12 @@
 export interface BinaryOp {
   id: string;
   symbol: string;
-  label: string;
   display: "gainmap" | "linear";
 }
 
 export const BINARY_OPS: readonly BinaryOp[] = [
-  { id: "div", symbol: "÷", label: "除法", display: "gainmap" },
-  { id: "mul", symbol: "×", label: "乘法", display: "linear" },
+  { id: "div", symbol: "÷", display: "gainmap" },
+  { id: "mul", symbol: "×", display: "linear" },
 ];
 
 export const DEFAULT_OP_ID = "div";

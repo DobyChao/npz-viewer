@@ -3,6 +3,7 @@ import { FileArchive } from "lucide-react";
 import { api } from "../lib/api";
 import { formatBytes, formatTime } from "../lib/format";
 import { useCurrentNpz } from "../hooks/useCurrentNpz";
+import { useT } from "../i18n";
 import { CopyButton, ErrorBox, Spinner } from "./ui";
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -15,6 +16,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export function NpzInfo() {
+  const t = useT();
   const { path, meta, isLoading, error } = useCurrentNpz();
   const { data: position } = useQuery({
     queryKey: ["npz-locate", path],
@@ -25,7 +27,7 @@ export function NpzInfo() {
   if (!path) {
     return (
       <div className="flex h-12 shrink-0 items-center border-b border-zinc-800 bg-zinc-900/40 px-3 text-xs text-zinc-600">
-        在左侧选择一个 npz 文件
+        {t("info.pickFile")}
       </div>
     );
   }
@@ -49,7 +51,7 @@ export function NpzInfo() {
               )}
               {meta?.compressed && (
                 <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
-                  已压缩
+                  {t("info.compressed")}
                 </span>
               )}
             </div>
@@ -57,15 +59,15 @@ export function NpzInfo() {
           </div>
 
           <div className="flex shrink-0 items-center gap-4">
-            <Field label="大小" value={meta ? formatBytes(meta.size) : "—"} />
+            <Field label={t("info.size")} value={meta ? formatBytes(meta.size) : "—"} />
             <Field label="key" value={meta ? meta.keys.length : "—"} />
-            <Field label="修改" value={meta ? formatTime(meta.mtime) : "—"} />
+            <Field label={t("info.modified")} value={meta ? formatTime(meta.mtime) : "—"} />
             <div className="flex items-center gap-1">
-              <CopyButton value={meta?.name ?? ""} title="复制文件名">
-                文件名
+              <CopyButton value={meta?.name ?? ""} title={t("info.copyName")}>
+                {t("info.filename")}
               </CopyButton>
-              <CopyButton value={path} title="复制完整路径">
-                路径
+              <CopyButton value={path} title={t("info.copyPath")}>
+                {t("info.path")}
               </CopyButton>
             </div>
           </div>
