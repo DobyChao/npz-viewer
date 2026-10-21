@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-// Assemble a Windows x64 portable zip: Tauri exe + bundled Node + embeddable
-// Python + frontend dist + hub server. Extract and double-click; no git checkout.
+// Windows portable desktop: embedded Tauri UI + native SSH + embeddable Python.
+// Node is a build dependency only; no JavaScript runtime is shipped.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
-  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -25,7 +24,6 @@ const VERSION = JSON.parse(readFileSync(join(FRONTEND, "package.json"), "utf8"))
 const STAGE_NAME = `npz-view-${VERSION}-windows-x64`;
 const STAGE = join(DIST_PORTABLE, STAGE_NAME);
 const ZIP = join(DIST_PORTABLE, `${STAGE_NAME}.zip`);
-const NODE_VERSION = process.env.NPZVIEW_NODE_VERSION ?? "24.18.0";
 const PYTHON_VERSION = process.env.NPZVIEW_PYTHON_VERSION ?? "3.14.6";
 
 function die(message) {
@@ -164,37 +162,6 @@ async function main() {
   }
   run("npm", ["run", "build"], FRONTEND);
 
-  const hubOut = join(CACHE, "hub-server.mjs");
-  run(
-    "npx",
-    [
-      "esbuild",
-      "hub/standalone.ts",
-      "--bundle",
-      "--platform=node",
-      "--format=esm",
-      `--outfile=${hubOut}`,
-      "--packages=bundle",
-      "--external:ssh2",
-      "--external:cpu-features",
-      "--external:sshcrypto",
-    ],
-    FRONTEND,
-  );
-
-  const nodeZip = join(CACHE, `node-v${NODE_VERSION}-win-x64.zip`);
-  await download(
-    `https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-win-x64.zip`,
-    nodeZip,
-  );
-  const nodeExtract = join(CACHE, `node-v${NODE_VERSION}-win-x64`);
-  const nodeExeSrc = join(nodeExtract, `node-v${NODE_VERSION}-win-x64`, "node.exe");
-  if (!existsSync(nodeExeSrc)) {
-    rmSync(nodeExtract, { recursive: true, force: true });
-    extractZip(nodeZip, nodeExtract);
-  }
-  if (!existsSync(nodeExeSrc)) die(`node.exe missing at ${nodeExeSrc}`);
-
   const pyZip = join(CACHE, `python-${PYTHON_VERSION}-embed-amd64.zip`);
   await download(
     `https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-embed-amd64.zip`,
@@ -251,42 +218,25 @@ async function main() {
   }
 
   const buildEnv = windowsBuildEnv();
-  let exe = findExe(buildEnv.CARGO_TARGET_DIR);
-  if (exe && !process.env.NPZVIEW_FORCE_TAURI) {
-    console.log(`reusing ${exe}（窗口壳未改；设 NPZVIEW_FORCE_TAURI=1 可强制重编）`);
-  } else {
-    run("npx", ["tauri", "build", "--no-bundle"], FRONTEND, { env: buildEnv });
-    exe = findExe(buildEnv.CARGO_TARGET_DIR);
-    if (!exe) die("npz-view.exe not found after tauri build");
-  }
+  // Always rebuild: existence of an old exe does not prove its Rust/UI is current.
+  run("npx", ["tauri", "build", "--no-bundle"], FRONTEND, { env: buildEnv });
+  const exe = findExe(buildEnv.CARGO_TARGET_DIR);
+  if (!exe) die("npz-view.exe not found after tauri build");
 
   rmSync(STAGE, { recursive: true, force: true });
-  mkdirSync(join(STAGE, "scripts"), { recursive: true });
-  mkdirSync(join(STAGE, "runtime", "node"), { recursive: true });
-  mkdirSync(join(STAGE, "frontend", "dist"), { recursive: true });
+  mkdirSync(STAGE, { recursive: true });
 
   copyFileSync(exe, join(STAGE, "npz-view.exe"));
-  copyFileSync(join(ROOT, "scripts", "npz-view.mjs"), join(STAGE, "scripts", "npz-view.mjs"));
-  copyFileSync(hubOut, join(STAGE, "scripts", "hub-server.mjs"));
-  copyFileSync(nodeExeSrc, join(STAGE, "runtime", "node", "node.exe"));
-  cpSync(pyDir, join(STAGE, "runtime", "python"), { recursive: true });
+  copyTree(pyDir, join(STAGE, "runtime", "python"), (name) =>
+    name === "__pycache__" || name.endsWith(".pyc") || name === "pip" || /^pip-.*\.dist-info$/.test(name),
+  );
   copyTree(join(ROOT, "backend"), join(STAGE, "backend"), skipBackend);
   copyFileSync(join(ROOT, "requirements.txt"), join(STAGE, "requirements.txt"));
-  cpSync(join(FRONTEND, "dist"), join(STAGE, "frontend", "dist"), { recursive: true });
   copyFileSync(join(ROOT, "scripts", "windows-client.txt"), join(STAGE, "README.txt"));
   writeFileSync(
     join(STAGE, "open.bat"),
     '@echo off\r\ncd /d "%~dp0"\r\nstart "" "npz-view.exe"\r\n',
   );
-
-  const vendor = join(CACHE, "ssh2-vendor");
-  const vendorSsh2 = join(vendor, "node_modules", "ssh2");
-  if (!existsSync(vendorSsh2)) {
-    mkdirSync(vendor, { recursive: true });
-    writeFileSync(join(vendor, "package.json"), '{"private":true}\n');
-    run("npm", ["install", "ssh2@1.17.0", "--omit=dev", "--ignore-scripts"], vendor);
-  }
-  cpSync(join(vendor, "node_modules"), join(STAGE, "node_modules"), { recursive: true });
 
   if (existsSync(ZIP)) rmSync(ZIP);
   const stagingParent = DIST_PORTABLE;

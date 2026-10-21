@@ -4,7 +4,7 @@
   "windows": ["*"],
   "webviews": ["*"],
   "remote": {
-    "urls": ["http://127.0.0.1:*"]
+    "urls": ["http://127.0.0.1:5273"]
   },
   "permissions": [
     "core:default",

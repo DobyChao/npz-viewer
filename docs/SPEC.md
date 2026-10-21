@@ -55,7 +55,7 @@
 - 所有分栏使用 `react-resizable-panels`，尺寸持久化到 localStorage。
 - ComparePanel 有三态：`hidden` / `split`（与 Gallery 上下分栏）/ `full`（占满整个右侧区域，Gallery 隐藏）。
 - 左栏上下两块也可拖拽调整比例。
-- 桌面客户端（Tauri）在窗口顶部另有**原生标签栏**：每个标签一个独立 WebView，URL 带 `?session=`，各自选择本机或已连接的远端后端。浏览器 / `npm run dev` 仍是单页。发布壳的 UI 端口由客户端临时分配，不固定 5273。
+- 桌面客户端（Tauri）在窗口顶部另有**原生标签栏**：每个标签一个独立 WebView，URL 带 `?session=`，各自选择本机或已连接的远端后端。浏览器 / `npm run dev` 仍是单页。桌面发布版内嵌页面，Rust 管理 SSH / SFTP、会话与带令牌的临时 loopback 数据桥，不携带 Node；本机 Python 首次数据请求时启动。详见 `docs/desktop-runtime.md`。
 - 界面中英双语，顶栏 **中 / EN** 与设置里可切换。
 
 ---
@@ -554,3 +554,4 @@ confirm_large, save_dir?, viewport?: {scale,x,y,tile_width,tile_height,natural_s
 | 2026-09-15 | 桌面客户端原生多 WebView 标签，每标签独立 hub session / 后端；发布壳 UI 端口临时分配 | 多远端并行对比；避免固定占用 5273 |
 | 2026-09-17 | 远端连接先 health/占用探测，同用户已有后端则复用；连接可中断；venv 已能导入则跳过 pip | 避免每次连都卡在装依赖；坏网时不应反复失败 |
 | 2026-09-21 | 界面中英双语，默认跟随浏览器 | 顶栏/设置切换；文案进 `frontend/src/i18n` |
+| 2026-10-21 | 版本统一为 0.2.0：Rust 接管桌面 SSH、会话与数据桥，页面内嵌，本机 Python 按需启动 | 移除便携包 Node 运行时，前端、Tauri 和后端版本保持一致 |

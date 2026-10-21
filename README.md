@@ -27,7 +27,7 @@
 
 - Python 3.11+（开发验证于 3.14）
 - Node.js `^20.19.0 || >=22.12.0`（Vite 8 要求，已写进 `frontend/package.json` 的 `engines`；开发验证于 24）
-- 桌面窗口（`npm run tauri:dev` / `tauri:build`）：Rust 1.85+，以及系统 WebView（Linux：`libwebkit2gtk-4.1-dev` `libgtk-3-dev`）
+- 桌面窗口（`npm run tauri:dev` / `tauri:build`）：Rust 1.89+，以及系统 WebView（Linux：`libwebkit2gtk-4.1-dev` `libgtk-3-dev`）
 
 `typecheck` 直接调用 `node node_modules/typescript/lib/tsc.js` 而不是 `tsc`：typescript 7 的 `bin/tsc` 是没有扩展名的 ESM，稍旧的 Node 会报 `ERR_UNKNOWN_FILE_EXTENSION`。走带扩展名的 `lib/tsc.js` 在整个版本范围内都能用。
 
@@ -95,7 +95,7 @@ cd ../backend && ..\.venv\Scripts\python -m app.main --static-dir ../frontend/di
 
 ## 本机客户端（Tauri）
 
-浏览器不能 SSH。桌面窗口是 Tauri（系统 WebView），SSH 仍是本机 Node `ssh2` hub。
+桌面窗口、标签页、SSH / SFTP、连接会话和数据转发由 Tauri / Rust 管理。页面内嵌在 exe 中；Python 专注于 NPZ 读取、渲染和导出，本机 Python 在首次本机数据请求时启动。浏览器模式仍使用 Node `ssh2` hub。
 
 ```bash
 cd frontend && npm install
@@ -113,9 +113,9 @@ cd frontend && npm install
 npm run pack:windows
 ```
 
-产物是 `dist-portable/npz-view-0.1.1-windows-x64.zip`。解压到普通文件夹，双击 `npz-view.exe`。zip 里已带 Node、embeddable Python 和前端 dist，**不需要**再装 Node / Python，也**不要**放到 Program Files。打不开时看同目录 `npz-view-hub.log`。
+产物是 `dist-portable/npz-view-0.2.0-windows-x64.zip`。解压到普通文件夹，双击 `npz-view.exe`。zip 里带 Tauri exe、embeddable Python 和后端源码，页面已内嵌在 exe 中，**不携带 Node**。不需要另装 Node / Python，也**不要**放到 Program Files。启动错误看同目录 `npz-view-boot.log`，本机后端错误看 `npz-view-backend.log`。
 
-源码直接打 exe（迭代用，仍要本机 Node / Python / 这份仓库）：
+源码直接打 exe（Node 仅在构建时需要，运行时需要本机 Python / 这份仓库）：
 
 ```bash
 cd frontend && npm run build
@@ -124,7 +124,7 @@ npm run tauri:build
 
 Windows x64 交叉编译（Linux 上）可用 `npm run tauri:build:windows`；那个 NSIS `setup.exe` 会装到 Program Files，便携布局对不上，请用上面的 zip。
 
-发布版启动时会拉起 `scripts/npz-view.mjs`（便携版用自带 Python + hub；源码运行则用本机 Python + vite preview），并给 hub 一个**临时本机端口**（`NPZVIEW_UI_PORT`，不固定占用 5273）。关掉最后一个标签或退出窗口会停掉这层壳。
+发布版直接加载 Tauri 内嵌页面。Rust 数据桥使用临时 loopback 端口和每次启动独立的令牌；窗口启动不等待本机 Python。首次访问本机数据时启动 Python（默认 8756，便携版不复用其他进程）。关掉最后一个标签或退出窗口会关闭隧道并停止本次启动的本机后端。详见 [桌面运行架构与验证](docs/desktop-runtime.md)。
 
 只要页面、不要窗口时：
 
@@ -156,7 +156,7 @@ node scripts/npz-view.mjs
 
 要求：远端目录里要有 `.venv`（首次连接会尝试用系统 `python3 -m venv` 创建）。后端需要 Python 3.13+ 才能用视频导出。服务器列表存在本机 `servers.json`（已 gitignore）。
 
-纯 Python `--static-dir` 单进程没有这层 Node，不能从 UI 发起 SSH。
+纯 Python `--static-dir` 单进程不包含连接管理，不能从 UI 发起 SSH。桌面端首次连接会将主机密钥记录在 `.npzview-known-hosts`，后续拒绝密钥变更；也会检查已有 OpenSSH known_hosts。
 
 ## 渲染规则
 

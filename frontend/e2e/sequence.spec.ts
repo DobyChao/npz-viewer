@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import type { Page } from "@playwright/test";
 
 const ROOT_LABEL = "样例数据";
@@ -147,8 +147,10 @@ test("scrubbing skips intermediate frames until the target is painted", async ({
     const observer = new MutationObserver(read);
     observer.observe(tile, { subtree: true, childList: true, characterData: true });
     const input = document.querySelector("[data-testid='sequence-scrubber']") as HTMLInputElement;
+    // Bypass React's value tracker so these rapid DOM events reach onChange.
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
     for (const value of ["1", "2"]) {
-      input.value = value;
+      setValue.call(input, value);
       input.dispatchEvent(new Event("input", { bubbles: true }));
     }
     input.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));

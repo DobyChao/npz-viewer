@@ -1,3 +1,5 @@
+import { transportHeaders, transportUrl } from "./transport";
+
 const SESSION_QUERY = "session";
 const HUB_SESSION_QUERY = "npzview_session";
 
@@ -24,22 +26,22 @@ export function getSessionId(): string {
 }
 
 export function sessionHeaders(): Record<string, string> {
-  return sessionId ? { "X-Npzview-Session": sessionId } : {};
+  return { ...transportHeaders(), ...(sessionId ? { "X-Npzview-Session": sessionId } : {}) };
 }
 
 export function withSessionQuery(url: string): string {
-  if (!sessionId) return url;
+  if (!sessionId) return transportUrl(url);
   const parsed = new URL(url, window.location.origin);
   parsed.searchParams.set(HUB_SESSION_QUERY, sessionId);
-  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  return transportUrl(`${parsed.pathname}${parsed.search}${parsed.hash}`);
 }
 
 export async function ensureSession(): Promise<string> {
   const existing = sessionId || readSessionFromUrl();
   try {
-    const response = await fetch("/__hub/sessions", {
+    const response = await fetch(transportUrl("/__hub/sessions"), {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(existing ? { "X-Npzview-Session": existing } : {}) },
+      headers: { "Content-Type": "application/json", ...transportHeaders(), ...(existing ? { "X-Npzview-Session": existing } : {}) },
       body: JSON.stringify(existing ? { id: existing } : {}),
     });
     const text = await response.text();

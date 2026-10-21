@@ -1,14 +1,25 @@
 [package]
 name = "npz-view"
-version = "0.1.1"
-description = "npz 浏览器 desktop client (Tauri + Node hub)"
+version = "0.2.0"
+description = "npz 浏览器 desktop client"
 authors = ["npz-view"]
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.89"
 
 [lib]
 name = "npz_view_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
+
+[features]
+bridge-harness = []
+
+[[bin]]
+name = "npz-view-bridge"
+path = "src/bridge.rs"
+required-features = ["bridge-harness"]
+
+[dev-dependencies]
+rand = "0.10"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -18,3 +29,16 @@ tauri = { version = "2", features = ["unstable"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
+anyhow = "1"
+axum = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["stream"] }
+russh = { version = "0.64.1", default-features = false, features = ["ring", "rsa"] }
+russh-sftp = "3.0.1"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tower-http = { version = "0.6", features = ["cors"] }
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+strip = true
+lto = "thin"

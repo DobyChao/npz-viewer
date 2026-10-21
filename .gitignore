@@ -17,6 +17,9 @@ servers.json
 frontend/src-tauri/target/
 frontend/src-tauri/gen/
 npz-view-hub.log
+npz-view-backend.log
+npz-view-boot.log
+.npzview-known-hosts
 dist-portable/
 packaging/cache/
 .DS_Store

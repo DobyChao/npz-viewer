@@ -27,7 +27,7 @@ Canonical product spec: [`docs/SPEC.md`](docs/SPEC.md) (Chinese). Compare-panel 
 
 - Python 3.11+ (developed on 3.14)
 - Node.js `^20.19.0 || >=22.12.0` (Vite 8; listed in `frontend/package.json` `engines`; developed on 24)
-- Desktop window (`npm run tauri:dev` / `tauri:build`): Rust 1.85+ and the system WebView (Linux: `libwebkit2gtk-4.1-dev` `libgtk-3-dev`)
+- Desktop window (`npm run tauri:dev` / `tauri:build`): Rust 1.89+ and the system WebView (Linux: `libwebkit2gtk-4.1-dev` `libgtk-3-dev`)
 
 `typecheck` calls `node node_modules/typescript/lib/tsc.js` instead of `tsc`. TypeScript 7's `bin/tsc` is an extensionless ESM file; older Node raises `ERR_UNKNOWN_FILE_EXTENSION`. The `.js` entry works across the engine range.
 
@@ -95,7 +95,7 @@ Environment variables with an `NPZVIEW_` prefix work too, e.g. `NPZVIEW_PORT=900
 
 ## Desktop client (Tauri)
 
-The browser cannot SSH. The desktop window is Tauri (system WebView); SSH is still a local Node `ssh2` hub.
+The desktop window, native tabs, SSH/SFTP, sessions and data routing run in Tauri/Rust. The UI is embedded; Python handles NPZ processing and starts on the first local data request. Browser mode still uses the Node `ssh2` hub.
 
 ```bash
 cd frontend && npm install
@@ -113,9 +113,9 @@ cd frontend && npm install
 npm run pack:windows
 ```
 
-Output: `dist-portable/npz-view-0.1.1-windows-x64.zip`. Extract to a normal folder and run `npz-view.exe`. The zip already includes Node, embeddable Python, and the frontend dist — **do not** install extra Node/Python, and **do not** put it in Program Files. If it fails to start, check `npz-view-hub.log` next to the exe.
+Output: `dist-portable/npz-view-0.2.0-windows-x64.zip`. Extract to a normal folder and run `npz-view.exe`. The zip includes the Tauri exe, embeddable Python and backend sources; the UI is embedded in the exe. **No Node runtime is shipped.** Do not install extra Node/Python or put it in Program Files. Check `npz-view-boot.log` for startup errors and `npz-view-backend.log` for local backend errors.
 
-Build an exe from source (still needs local Node / Python / this repo):
+Build an exe from source (Node is needed only at build time; running needs Python / this repo):
 
 ```bash
 cd frontend && npm run build
@@ -124,7 +124,7 @@ npm run tauri:build
 
 Cross-compile Windows x64 on Linux with `npm run tauri:build:windows`. That NSIS `setup.exe` installs to Program Files and does not match the portable layout — use the zip.
 
-A release build starts `scripts/npz-view.mjs` and gives the hub an **ephemeral local port** (`NPZVIEW_UI_PORT`, not fixed 5273). Closing the last tab or the window stops that shell.
+Release builds load embedded assets. The Rust data bridge uses an ephemeral loopback port and a per-launch token. Window startup does not wait for Python; the first local data request starts it (8756 by default, portable builds do not reuse other processes). Closing the last tab or window closes tunnels and stops the local backend started by this instance. See [desktop runtime and validation](docs/desktop-runtime.md).
 
 UI only, no native window:
 
@@ -156,7 +156,7 @@ Port conflicts:
 
 The remote dir needs a `.venv` (first connect tries `python3 -m venv`). Video export needs Python 3.13+ on the remote. The server list lives in local `servers.json` (gitignored).
 
-Pure Python `--static-dir` has no Node layer, so the UI cannot start SSH.
+Pure Python `--static-dir` has no connection manager, so the UI cannot start SSH. Native desktop records first-use host keys in `.npzview-known-hosts`, rejects changed keys, and also checks existing OpenSSH known_hosts.
 
 ## Render rules
 

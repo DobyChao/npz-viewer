@@ -2,6 +2,7 @@
 // Lets the UI manage remote-backend servers and pick which one serves /api.
 
 import { sessionHeaders } from "./session";
+import { transportUrl } from "./transport";
 
 export type ServerConnState = "idle" | "connecting" | "active" | "error";
 export type AuthMethod = "agent" | "password" | "key";
@@ -68,7 +69,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   for (const [key, value] of Object.entries(sessionHeaders())) {
     if (!headers.has(key)) headers.set(key, value);
   }
-  const response = await fetch(`${HUB}${path}`, { ...init, headers });
+  const response = await fetch(transportUrl(`${HUB}${path}`), { ...init, headers });
   const text = await response.text();
   const body = text ? JSON.parse(text) : {};
   if (!response.ok) {

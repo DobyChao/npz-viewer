@@ -1,0 +1,3 @@
+# Shared scripts are sent verbatim to Linux over SSH, including on Windows.
+scripts/remote/*.sh text eol=lf
+scripts/remote/*.py text eol=lf

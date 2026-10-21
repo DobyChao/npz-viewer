@@ -8,4 +8,6 @@ npz 浏览器 — Windows x64 便携版
 第一次打开后，在顶栏「管理 root」里加上你的 npz 目录。
 「后端服务器」可以 SSH 连远程（密码 / 密钥 / ssh-agent）。
 
-关掉窗口会停掉本机后端。若打不开，看同目录下的 npz-view-hub.log。
+桌面端内置 SSH，不含 Node 运行时。本机 Python 在首次访问本机数据时启动。
+关掉窗口会停掉本机后端。若打不开，看同目录的 npz-view-boot.log；
+本机数据加载失败时看 npz-view-backend.log。
