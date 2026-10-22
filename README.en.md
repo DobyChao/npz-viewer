@@ -113,7 +113,7 @@ cd frontend && npm install
 npm run pack:windows
 ```
 
-Output: `dist-portable/npz-view-0.2.0-windows-x64.zip`. Extract to a normal folder and run `npz-view.exe`. The zip includes the Tauri exe, embeddable Python and backend sources; the UI is embedded in the exe. **No Node runtime is shipped.** Do not install extra Node/Python or put it in Program Files. Check `npz-view-boot.log` for startup errors and `npz-view-backend.log` for local backend errors.
+Output: `dist-portable/npz-view-0.2.1-windows-x64.zip`. Extract to a normal folder and run `npz-view.exe`. The zip includes the Tauri exe, embeddable Python and backend sources; the UI is embedded in the exe. **No Node runtime is shipped.** Do not install extra Node/Python or put it in Program Files. Check `npz-view-boot.log` for startup errors and `npz-view-backend.log` for local backend errors.
 
 Build an exe from source (Node is needed only at build time; running needs Python / this repo):
 

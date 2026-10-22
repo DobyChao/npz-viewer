@@ -1,6 +1,6 @@
 [package]
 name = "npz-view"
-version = "0.2.0"
+version = "0.2.1"
 description = "npz 浏览器 desktop client"
 authors = ["npz-view"]
 edition = "2021"
