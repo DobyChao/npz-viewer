@@ -94,7 +94,7 @@ export function NpzList() {
 
   const [search, setSearch] = useState(list.q);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const pendingAutoOpen = useRef<number | null>(null);
+  const pendingAutoOpen = useRef<{ dir: string; page: number; index: number } | null>(null);
 
   useEffect(() => setSearch(list.q), [list.q]);
 
@@ -105,7 +105,7 @@ export function NpzList() {
     return () => window.clearTimeout(timer);
   }, [search, list.q, setList]);
 
-  const { data, error, isFetching } = useQuery({
+  const { data, error, isFetching, isPlaceholderData } = useQuery({
     queryKey: [
       "npz-list",
       currentDir,
@@ -132,23 +132,31 @@ export function NpzList() {
 
   // "Auto-open the Nth npz" is folder-wide, so jump to the page that contains it first.
   useEffect(() => {
+    pendingAutoOpen.current = null;
     if (!currentDir || !autoOpen.enabled) return;
     // Sibling-folder navigation already picked a file here; don't override it.
     if (currentNpz && dirname(currentNpz).toLowerCase() === currentDir.toLowerCase()) return;
     const target = Math.max(1, autoOpen.index);
     const page = Math.ceil(target / list.pageSize);
-    pendingAutoOpen.current = (target - 1) % list.pageSize;
+    pendingAutoOpen.current = { dir: currentDir, page, index: target - 1 };
     setList({ page });
     // Deliberately excludes currentNpz: re-running on every selection would fight the user.
   }, [currentDir, autoOpen.enabled, autoOpen.index, list.pageSize, setList]);
 
   useEffect(() => {
-    const offset = pendingAutoOpen.current;
-    if (offset === null || items.length === 0) return;
+    const pending = pendingAutoOpen.current;
+    // keepPreviousData can still expose another folder/page while the target
+    // query is loading. Do not consume the pending selection until it arrives.
+    if (!pending || !data || isPlaceholderData || pending.dir !== currentDir ||
+        data.dir !== pending.dir || data.page_size !== list.pageSize ||
+        data.page !== Math.min(pending.page, data.pages)) return;
     pendingAutoOpen.current = null;
-    const target = items[Math.min(offset, items.length - 1)];
+    const index = Math.min(pending.index, data.total - 1);
+    const offset = index - (data.page - 1) * data.page_size;
+    const target = data.items[offset];
     if (target) setNpz(target.path);
-  }, [items, setNpz]);
+    if (list.page !== data.page) setList({ page: data.page });
+  }, [currentDir, data, isPlaceholderData, list.page, list.pageSize, setList, setNpz]);
 
   const virtualizer = useVirtualizer({
     count: items.length,
