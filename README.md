@@ -113,7 +113,7 @@ cd frontend && npm install
 npm run pack:windows
 ```
 
-产物是 `dist-portable/npz-view-0.2.0-windows-x64.zip`。解压到普通文件夹，双击 `npz-view.exe`。zip 里带 Tauri exe、embeddable Python 和后端源码，页面已内嵌在 exe 中，**不携带 Node**。不需要另装 Node / Python，也**不要**放到 Program Files。启动错误看同目录 `npz-view-boot.log`，本机后端错误看 `npz-view-backend.log`。
+产物是 `dist-portable/npz-view-0.2.1-windows-x64.zip`。解压到普通文件夹，双击 `npz-view.exe`。zip 里带 Tauri exe、embeddable Python 和后端源码，页面已内嵌在 exe 中，**不携带 Node**。不需要另装 Node / Python，也**不要**放到 Program Files。启动错误看同目录 `npz-view-boot.log`，本机后端错误看 `npz-view-backend.log`。
 
 源码直接打 exe（Node 仅在构建时需要，运行时需要本机 Python / 这份仓库）：
 
